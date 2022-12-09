@@ -84,10 +84,10 @@ if __name__ == '__main__':
                 player_group.update()
 
             if event.type == GRAVITY:
-                col = pygame.sprite.spritecollide(player, platform_group, False)
-                if col:
-                    player.rect = player.rect.move(0, col[0].rect.y - player.rect.y - player.rect.height + 1)
-                    player.speedY = 0
+                collide = pygame.sprite.spritecollide(player, platform_group, False)
+                if collide:
+                    for col in collide:
+                        pass # adoka;ldma;ldma;Dmakmdak;ldmakl;mrfkarfkamfkamfkamf;kamf;amfkmkfmk;l
                 else:
                     player.speedY += 0.05
 
