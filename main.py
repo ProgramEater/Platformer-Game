@@ -85,10 +85,24 @@ if __name__ == '__main__':
 
             if event.type == GRAVITY:
                 collide = pygame.sprite.spritecollide(player, platform_group, False)
-                if collide:
-                    for col in collide:
-                        pass # adoka;ldma;ldma;Dmakmdak;ldmakl;mrfkarfkamfkamfkamf;kamf;amfkmkfmk;l
-                else:
+                for plat in collide:
+                    colX = (plat.rect.w + player.rect.w) // 2 - abs(plat.rect.x + plat.rect.w // 2 - player.rect.x -
+                                                                    player.rect.w // 2)
+                    colY = (plat.rect.h + player.rect.h) // 2 - abs(plat.rect.y + plat.rect.h // 2 - player.rect.y -
+                                                                    player.rect.h // 2)
+                    colY = plat.rect.h if colY > plat.rect.h else colY
+                    print(colX, colY)
+                    if colX >= colY:
+                        player.rect.y = plat.rect.y - player.rect.h + 1 if player.speedY >= 0 else \
+                            plat.rect.y + plat.rect.h + 1
+                        player.speedY = 0
+                        break
+                    else:
+                        player.rect.x = plat.rect.x - player.rect.w - 1 if player.speedX > 0 else \
+                            plat.rect.x + plat.rect.w + 1
+                        player.speedX = 0
+                        print(colX, colY)
+                if not collide:
                     player.speedY += 0.05
 
         camera.update()
