@@ -1,15 +1,19 @@
 import pygame
 
+PIX_IN_M = 72
+
 
 class Player(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__(player_group)
-        self.rect = pygame.rect.Rect(x, y, 30, 40)
-        self.image = pygame.image.load('data/player.png')
+        self.image = pygame.transform.scale(pygame.image.load('data/player.png'), (1 * PIX_IN_M, 1.5 * PIX_IN_M))
+        self.rect = self.image.get_rect()
+        self.rect.x = x
+        self.rect.y = y
         self.speed = 5
         self.dirX = 0
         self.speedY = 0
-        self.g = 1
+        self.g = 0.7
         self.can_jump = 1
 
     def get_input(self):
@@ -39,11 +43,11 @@ class Player(pygame.sprite.Sprite):
         if pygame.sprite.spritecollide(self, platform_group, False):
             plat = pygame.sprite.spritecollide(self, platform_group, False)[0]
             if axis == 'y':
-                self.rect.y = plat.rect.y - self.rect.h if self.speedY >= 0 else plat.rect.y + plat.rect.h + 1
+                self.rect.y = plat.rect.y - self.rect.h if self.speedY >= 0 else plat.rect.y + plat.rect.h
                 self.speedY = 0
                 self.can_jump = 1
             else:
-                self.rect.x = plat.rect.x - self.rect.w - 1 if self.dirX > 0 else plat.rect.x + plat.rect.w + 1
+                self.rect.x = plat.rect.x - self.rect.w if self.dirX > 0 else plat.rect.x + plat.rect.w
                 self.dirX = 0
 
     def gravity(self):
@@ -61,35 +65,43 @@ class Camera:
         obj.rect = obj.rect.move(0, self.dy)
 
 
-def load_level(name):
-    with open(name) as level:
-        for y, st in enumerate(level.readlines()):
-            for x, elem in enumerate(st):
-                if elem == '#':
-                    a = pygame.sprite.Sprite(platform_group)
-                    a.image = pygame.transform.scale(pygame.image.load('data/player.png'), (20, 20))
-                    a.rect = a.image.get_rect()
-                    a.rect.x = x * 20 + 100
-                    a.rect.y = y * 20
+class Level:
+    def __init__(self, start_level=0):
+        self.current_level = start_level
+        self.level_names = ['data/' + lev_name for lev_name in ['lev.txt', 'lev2.txt']]
+
+    def load_level(self, name):
+        with open(name) as level:
+            for y, st in enumerate(level.readlines()):
+                for x, elem in enumerate(st):
+                    if elem == '#':
+                        a = pygame.sprite.Sprite(platform_group)
+                        a.image = pygame.transform.scale(pygame.image.load('data/player.png'),
+                                                         (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
+                        a.rect = a.image.get_rect()
+                        a.rect.x = x * 0.5 * PIX_IN_M
+                        a.rect.y = y * 0.5 * PIX_IN_M
+
+    def load_another(self, next_prev):
+        self.load_level(self.level_names[self.current_level + next_prev])
+        self.current_level += next_prev
 
 
 if __name__ == '__main__':
     pygame.init()
 
     player_group = pygame.sprite.Group()
-    player = Player(200, 180)
+    player = Player(100, 180)
 
     platform_group = pygame.sprite.Group()
-    platform1 = pygame.sprite.Sprite(platform_group)
-    platform1.rect = pygame.rect.Rect(100, 300, 300, 50)
-    platform1.image = pygame.transform.scale(pygame.image.load('data/player.png'), (300, 50))
-
-    load_level('data/lev.txt')
 
     camera = Camera()
 
+    the_level = Level()
+    the_level.load_another(0)
+    the_level.load_another(1)
     # screen:
-    size = width, height = 1000, 800
+    size = width, height = 1920, 1080
     screen = pygame.display.set_mode(size)
 
     clock = pygame.time.Clock()
