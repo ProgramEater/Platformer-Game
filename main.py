@@ -6,12 +6,48 @@ class Player(pygame.sprite.Sprite):
         super().__init__(player_group)
         self.rect = pygame.rect.Rect(x, y, 30, 40)
         self.image = pygame.image.load('data/player.png')
-        self.speedX = 0
+        self.speed = 5
+        self.dirX = 0
         self.speedY = 0
+        self.g = 1
+        self.can_jump = 1
+
+    def get_input(self):
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_a]:
+            self.dirX = -1
+        elif keys[pygame.K_d]:
+            self.dirX = 1
+        else:
+            self.dirX = 0
+        if keys[pygame.K_a] and keys[pygame.K_d]:
+            self.dirX = 0
+        if keys[pygame.K_SPACE]:
+            # ДОДЕЛАТЬ ПРЫЖОК --------------------------------------------------------------
+            self.speedY -= 2
 
     def update(self):
-        self.rect.x += self.speedX
+        self.get_input()
+        self.gravity()
+
         self.rect.y += self.speedY
+        self.collision('y')
+        self.rect.x += self.dirX * self.speed
+        self.collision('x')
+
+    def collision(self, axis):
+        if pygame.sprite.spritecollide(self, platform_group, False):
+            plat = pygame.sprite.spritecollide(self, platform_group, False)[0]
+            if axis == 'y':
+                self.rect.y = plat.rect.y - self.rect.h if self.speedY >= 0 else plat.rect.y + plat.rect.h + 1
+                self.speedY = 0
+                self.can_jump = 1
+            else:
+                self.rect.x = plat.rect.x - self.rect.w - 1 if self.dirX > 0 else plat.rect.x + plat.rect.w + 1
+                self.dirX = 0
+
+    def gravity(self):
+        self.speedY += self.g
 
 
 class Camera:
@@ -55,9 +91,12 @@ if __name__ == '__main__':
     # screen:
     size = width, height = 1000, 800
     screen = pygame.display.set_mode(size)
+
     clock = pygame.time.Clock()
+
     PLAYER_MOVE = pygame.USEREVENT + 1
     pygame.time.set_timer(PLAYER_MOVE, 2)
+
     GRAVITY = pygame.USEREVENT + 2
     pygame.time.set_timer(GRAVITY, 2)
 
@@ -66,44 +105,7 @@ if __name__ == '__main__':
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            if event.type == pygame.KEYDOWN:
-                if event.key == 97:
-                    player.speedX = -1
-                if event.key == 100:
-                    player.speedX = 1
-                if event.key == 32:
-                    player.rect.y -= 1
-                    player.speedY -= 3
-
-            if event.type == pygame.KEYUP:
-                keys = pygame.key.get_pressed()
-                if keys[97] == 0 == keys[100]:
-                    player.speedX = 0
-
-            if event.type == PLAYER_MOVE:
-                player_group.update()
-
-            if event.type == GRAVITY:
-                collide = pygame.sprite.spritecollide(player, platform_group, False)
-                for plat in collide:
-                    colX = (plat.rect.w + player.rect.w) // 2 - abs(plat.rect.x + plat.rect.w // 2 - player.rect.x -
-                                                                    player.rect.w // 2)
-                    colY = (plat.rect.h + player.rect.h) // 2 - abs(plat.rect.y + plat.rect.h // 2 - player.rect.y -
-                                                                    player.rect.h // 2)
-                    colY = plat.rect.h if colY > plat.rect.h else colY
-                    print(colX, colY)
-                    if colX >= colY:
-                        player.rect.y = plat.rect.y - player.rect.h + 1 if player.speedY >= 0 else \
-                            plat.rect.y + plat.rect.h + 1
-                        player.speedY = 0
-                        break
-                    else:
-                        player.rect.x = plat.rect.x - player.rect.w - 1 if player.speedX > 0 else \
-                            plat.rect.x + plat.rect.w + 1
-                        player.speedX = 0
-                        print(colX, colY)
-                if not collide:
-                    player.speedY += 0.05
+        player_group.update()
 
         camera.update()
         for i in platform_group:
