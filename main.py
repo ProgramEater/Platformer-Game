@@ -10,37 +10,43 @@ class Player(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.x = x
         self.rect.y = y
-        self.speed = 5
+        self.SPEED = 5
         self.dirX = 0
         self.speedY = 0
         self.g = 0.7
-        self.can_jump = 1
+        self.JUMP_SPEED = -2
+        self.jump = self.JUMP_SPEED
 
     def get_input(self):
-        global jump_Event_callable
         keys = pygame.key.get_pressed()
         if keys[pygame.K_a]:
-            self.dirX = -1
+            self.dirX -= 0.2
+            self.dirX = -1 if self.dirX < -1 else self.dirX
         elif keys[pygame.K_d]:
-            self.dirX = 1
+            self.dirX += 0.2
+            self.dirX = 1 if self.dirX > 1 else self.dirX
         else:
             self.dirX = 0
         if keys[pygame.K_a] and keys[pygame.K_d]:
             self.dirX = 0
         if keys[pygame.K_SPACE]:
-            if self.can_jump:
-                self.speedY -= 1
-                if jump_Event_callable:
-                    pygame.time.set_timer(PLAYER_JUMP, 500)
-                    jump_Event_callable = 0
+            if self.jump:
+                self.speedY = self.jump
 
     def update(self):
         self.get_input()
         self.gravity()
 
+        # jump change
+        if self.jump < 0:
+            self.jump -= 1
+            self.jump = 0 if self.jump < -15 else self.jump
+        if self.speedY > 1:
+            self.jump = 0
+
         self.rect.y += self.speedY
         self.collision('y')
-        self.rect.x += self.dirX * self.speed
+        self.rect.x += self.dirX * self.SPEED
         self.collision('x')
 
     def collision(self, axis):
@@ -49,7 +55,8 @@ class Player(pygame.sprite.Sprite):
             if axis == 'y':
                 self.rect.y = plat.rect.y - self.rect.h if self.speedY >= 0 else plat.rect.y + plat.rect.h
                 self.speedY = 0
-                self.can_jump = 1
+                if not pygame.key.get_pressed()[pygame.K_SPACE]:
+                    self.jump = self.JUMP_SPEED
             else:
                 self.rect.x = plat.rect.x - self.rect.w if self.dirX > 0 else plat.rect.x + plat.rect.w
                 self.dirX = 0
@@ -95,7 +102,7 @@ if __name__ == '__main__':
     pygame.init()
 
     player_group = pygame.sprite.Group()
-    player = Player(10, 180)
+    player = Player(50, 180)
 
     platform_group = pygame.sprite.Group()
 
