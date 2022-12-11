@@ -17,6 +17,7 @@ class Player(pygame.sprite.Sprite):
         self.can_jump = 1
 
     def get_input(self):
+        global jump_Event_callable
         keys = pygame.key.get_pressed()
         if keys[pygame.K_a]:
             self.dirX = -1
@@ -27,8 +28,11 @@ class Player(pygame.sprite.Sprite):
         if keys[pygame.K_a] and keys[pygame.K_d]:
             self.dirX = 0
         if keys[pygame.K_SPACE]:
-            # ДОДЕЛАТЬ ПРЫЖОК --------------------------------------------------------------
-            self.speedY -= 2
+            if self.can_jump:
+                self.speedY -= 1
+                if jump_Event_callable:
+                    pygame.time.set_timer(PLAYER_JUMP, 500)
+                    jump_Event_callable = 0
 
     def update(self):
         self.get_input()
@@ -91,7 +95,7 @@ if __name__ == '__main__':
     pygame.init()
 
     player_group = pygame.sprite.Group()
-    player = Player(100, 180)
+    player = Player(10, 180)
 
     platform_group = pygame.sprite.Group()
 
@@ -106,17 +110,20 @@ if __name__ == '__main__':
 
     clock = pygame.time.Clock()
 
-    PLAYER_MOVE = pygame.USEREVENT + 1
-    pygame.time.set_timer(PLAYER_MOVE, 2)
-
-    GRAVITY = pygame.USEREVENT + 2
-    pygame.time.set_timer(GRAVITY, 2)
+    PLAYER_JUMP = pygame.USEREVENT + 1
+    pygame.time.set_timer(PLAYER_JUMP, 0)
+    jump_Event_callable = 1
 
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
+            if event.type == PLAYER_JUMP:
+                player.can_jump = 0
+                pygame.time.set_timer(PLAYER_JUMP, 0)
+                jump_Event_callable = 1
         player_group.update()
 
         camera.update()
