@@ -16,13 +16,16 @@ class Player(pygame.sprite.Sprite):
         self.rect.y = y
 
         # constant speeds
-        self.SPEED = 5
+        self.SPEED = 6
         self.G = 1
         self.JUMP_SPEED = -2
         self.xACC = 0.2
 
         # x direction of player
         self.dirX = 0
+
+        # direction player is facing (True if he is facing to the right)
+        self.dirTowards = True
 
         # player Y speed
         self.speedY = 0
@@ -37,11 +40,14 @@ class Player(pygame.sprite.Sprite):
             self.texture = pygame.image.load('data/playerJump.png')
         else:
             self.texture = pygame.image.load('data/playerFall.png')
-        self.image = pygame.transform.scale(self.texture, self.size)
         if self.dirX > 0:
-            self.image = pygame.transform.scale(self.texture, self.size)
+            self.dirTowards = True
         elif self.dirX < 0:
-            self.image = pygame.transform.scale(pygame.transform.flip(self.texture, True, False), self.size)
+            self.dirTowards = False
+        if self.dirTowards:
+            self.image = pygame.transform.scale(self.texture, self.size)
+        else:
+            self.image = pygame.transform.flip(pygame.transform.scale(self.texture, self.size), True, False)
 
     def get_input(self):
         keys = pygame.key.get_pressed()
@@ -56,14 +62,11 @@ class Player(pygame.sprite.Sprite):
                 self.dirX = 0
             else:
                 self.dirX = (self.dirX // abs(self.dirX)) * (abs(self.dirX) - self.xACC)
-        if keys[pygame.K_a] and keys[pygame.K_d]:
-            self.dirX = 0
         if keys[pygame.K_SPACE]:
             if self.jump:
                 self.speedY = self.jump
 
     def update(self):
-        print(self.speedY)
         self.animate()
         self.get_input()
 
@@ -76,16 +79,10 @@ class Player(pygame.sprite.Sprite):
 
         self.gravity()
 
-        print(self.speedY, '------')
-
         self.rect.y += self.speedY
         self.collision('y')
         self.rect.x += self.dirX * self.SPEED
         self.collision('x')
-
-        print(self.speedY, '----------------------')
-
-
 
     def collision(self, axis):
         if pygame.sprite.spritecollide(self, platform_group, False):
