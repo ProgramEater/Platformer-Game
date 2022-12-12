@@ -6,27 +6,42 @@ PIX_IN_M = 72
 class Player(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__(player_group)
-        self.image = pygame.transform.scale(pygame.image.load('data/player.png'), (1 * PIX_IN_M, 1.5 * PIX_IN_M))
+        self.texture = pygame.transform.scale(pygame.image.load('data/playerDIR.png'), (1 * PIX_IN_M, 1.5 * PIX_IN_M))
+        self.image = self.texture
         self.rect = self.image.get_rect()
+
+        # sprite rect
         self.rect.x = x
         self.rect.y = y
+
+        # constant speeds
         self.SPEED = 5
-        self.dirX = 0
-        self.speedY = 0
-        self.g = 0.7
+        self.G = 0.7
         self.JUMP_SPEED = -2
+        self.xACC = 0.2
+
+        # x direction of player
+        self.dirX = 0
+
+        # player Y speed
+        self.speedY = 0
+
+        # current jump speed (JUMP_SPEED for convenience)
         self.jump = self.JUMP_SPEED
 
     def get_input(self):
         keys = pygame.key.get_pressed()
         if keys[pygame.K_a]:
-            self.dirX -= 0.2
+            self.dirX -= self.xACC
             self.dirX = -1 if self.dirX < -1 else self.dirX
         elif keys[pygame.K_d]:
-            self.dirX += 0.2
+            self.dirX += self.xACC
             self.dirX = 1 if self.dirX > 1 else self.dirX
         else:
-            self.dirX = 0
+            if abs(self.dirX) - self.xACC < 0:
+                self.dirX = 0
+            else:
+                self.dirX = (self.dirX // abs(self.dirX)) * (abs(self.dirX) - self.xACC)
         if keys[pygame.K_a] and keys[pygame.K_d]:
             self.dirX = 0
         if keys[pygame.K_SPACE]:
@@ -62,7 +77,7 @@ class Player(pygame.sprite.Sprite):
                 self.dirX = 0
 
     def gravity(self):
-        self.speedY += self.g
+        self.speedY += self.G
 
 
 class Camera:
