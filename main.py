@@ -6,7 +6,8 @@ PIX_IN_M = 72
 class Player(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__(player_group)
-        self.texture = pygame.transform.scale(pygame.image.load('data/playerDIR.png'), (1 * PIX_IN_M, 1.5 * PIX_IN_M))
+        self.size = (1 * PIX_IN_M, 1.5 * PIX_IN_M)
+        self.texture = pygame.transform.scale(pygame.image.load('data/playerDIR.png'), self.size)
         self.image = self.texture
         self.rect = self.image.get_rect()
 
@@ -16,7 +17,7 @@ class Player(pygame.sprite.Sprite):
 
         # constant speeds
         self.SPEED = 5
-        self.G = 0.7
+        self.G = 1
         self.JUMP_SPEED = -2
         self.xACC = 0.2
 
@@ -28,6 +29,19 @@ class Player(pygame.sprite.Sprite):
 
         # current jump speed (JUMP_SPEED for convenience)
         self.jump = self.JUMP_SPEED
+
+    def animate(self):
+        if self.speedY == 0:
+            self.texture = pygame.image.load('data/playerDir.png')
+        elif self.speedY < 0:
+            self.texture = pygame.image.load('data/playerJump.png')
+        else:
+            self.texture = pygame.image.load('data/playerFall.png')
+        self.image = pygame.transform.scale(self.texture, self.size)
+        if self.dirX > 0:
+            self.image = pygame.transform.scale(self.texture, self.size)
+        elif self.dirX < 0:
+            self.image = pygame.transform.scale(pygame.transform.flip(self.texture, True, False), self.size)
 
     def get_input(self):
         keys = pygame.key.get_pressed()
@@ -49,8 +63,9 @@ class Player(pygame.sprite.Sprite):
                 self.speedY = self.jump
 
     def update(self):
+        print(self.speedY)
+        self.animate()
         self.get_input()
-        self.gravity()
 
         # jump change
         if self.jump < 0:
@@ -59,10 +74,18 @@ class Player(pygame.sprite.Sprite):
         if self.speedY > 1:
             self.jump = 0
 
+        self.gravity()
+
+        print(self.speedY, '------')
+
         self.rect.y += self.speedY
         self.collision('y')
         self.rect.x += self.dirX * self.SPEED
         self.collision('x')
+
+        print(self.speedY, '----------------------')
+
+
 
     def collision(self, axis):
         if pygame.sprite.spritecollide(self, platform_group, False):
