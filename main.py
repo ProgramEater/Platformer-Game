@@ -1,15 +1,21 @@
 import pygame
 
-PIX_IN_M = 72
-
 
 class Player(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__(player_group)
         self.size = (1 * PIX_IN_M, 1.5 * PIX_IN_M)
-        self.texture = pygame.transform.scale(pygame.image.load('data/playerDIR.png'), self.size)
-        self.image = self.texture
+        self.image = pygame.transform.scale(pygame.image.load('data/playerDIR.png'), self.size)
         self.rect = self.image.get_rect()
+
+        self.animation_dir = {'walk': [], 'jump': [], 'idle': [], 'fall': []}
+        self.current_frame = 0
+        self.animation_speed = 0.2
+        for i in self.animation_dir.keys():
+            self.cut_the_frames(i + '.png')
+        # загрузить картинки с множеством кадров для каждой категории в animation_dir (.convert_alpha()!!!!!!!!)
+        # поделить их на кадры и добавить в словарь
+        # при надобности словарь можно дополнить нужными анимациями
 
         # sprite rect
         self.rect.x = x
@@ -33,21 +39,40 @@ class Player(pygame.sprite.Sprite):
         # current jump speed (JUMP_SPEED for convenience)
         self.jump = self.JUMP_SPEED
 
+    def cut_the_frames(self, image_name):
+        frame_set = pygame.image.load('data/' + image_name)
+        self.animation_dir[image_name[:-4]] = []
+        for x in range(frame_set.get_width() // self.rect.w):
+            for y in range(frame_set.get_height() // self.rect.h):
+                self.animation_dir[image_name[:-4]].append(frame_set.subsurface(self.rect.w * x, self.rect.h * y,
+                                                                                self.rect.w, self.rect.h))
+                print(self.animation_dir)
+
     def animate(self):
-        if self.speedY == 0:
-            self.texture = pygame.image.load('data/playerDir.png')
-        elif self.speedY < 0:
-            self.texture = pygame.image.load('data/playerJump.png')
-        else:
-            self.texture = pygame.image.load('data/playerFall.png')
+        # в зависимости от статуса менять self.image (flip if self.dirTowards)
+        # для трекинга кадра анимации: менять current_frame с 0 до количества кадров
+        status = self.moving_status()
+        self.current_frame += self.animation_speed
+        self.current_frame = 0 if len(self.animation_dir[status]) <= self.current_frame else self.current_frame
+        self.image = self.animation_dir[status][int(self.current_frame)]
+        if not self.dirTowards:
+            self.image = pygame.transform.flip(pygame.transform.scale(self.image, self.size), True, False)
+
+    def moving_status(self):
         if self.dirX > 0:
             self.dirTowards = True
         elif self.dirX < 0:
             self.dirTowards = False
-        if self.dirTowards:
-            self.image = pygame.transform.scale(self.texture, self.size)
-        else:
-            self.image = pygame.transform.flip(pygame.transform.scale(self.texture, self.size), True, False)
+        if self.speedY < 0:
+            return 'jump'
+        elif self.speedY == 0 and self.dirX == 0:
+            return 'idle'
+        elif self.speedY == 0 and self.dirX != 0:
+            return 'walk'
+        elif self.speedY > 0:
+            return 'fall'
+        # возвращать прыжок, ходьбу и т.д. в зависимости от того, что делает игрок (по скорости)
+        # менять self.dirTowards здесь
 
     def get_input(self):
         keys = pygame.key.get_pressed()
@@ -73,7 +98,7 @@ class Player(pygame.sprite.Sprite):
         # jump change
         if self.jump < 0:
             self.jump -= 1
-            self.jump = 0 if self.jump < -15 else self.jump
+            self.jump = 0 if self.jump < -16 else self.jump
         if self.speedY > 1:
             self.jump = 0
 
@@ -92,6 +117,8 @@ class Player(pygame.sprite.Sprite):
                 self.speedY = 0
                 if not pygame.key.get_pressed()[pygame.K_SPACE]:
                     self.jump = self.JUMP_SPEED
+                else:
+                    self.jump = 0
             else:
                 self.rect.x = plat.rect.x - self.rect.w if self.dirX > 0 else plat.rect.x + plat.rect.w
                 self.dirX = 0
@@ -136,6 +163,12 @@ class Level:
 if __name__ == '__main__':
     pygame.init()
 
+    # screen:
+    size = width, height = 1280, 800
+    PIX_IN_M = 72
+    # = height * 72 / 1080
+    screen = pygame.display.set_mode(size)
+
     player_group = pygame.sprite.Group()
     player = Player(50, 180)
 
@@ -146,15 +179,8 @@ if __name__ == '__main__':
     the_level = Level()
     the_level.load_another(0)
     the_level.load_another(1)
-    # screen:
-    size = width, height = 1920, 1080
-    screen = pygame.display.set_mode(size)
 
     clock = pygame.time.Clock()
-
-    PLAYER_JUMP = pygame.USEREVENT + 1
-    pygame.time.set_timer(PLAYER_JUMP, 0)
-    jump_Event_callable = 1
 
     running = True
     while running:
@@ -162,10 +188,6 @@ if __name__ == '__main__':
             if event.type == pygame.QUIT:
                 running = False
 
-            if event.type == PLAYER_JUMP:
-                player.can_jump = 0
-                pygame.time.set_timer(PLAYER_JUMP, 0)
-                jump_Event_callable = 1
         player_group.update()
 
         camera.update()
