@@ -21,14 +21,24 @@ class Player(pygame.sprite.Sprite):
         self.rect.x = x
         self.rect.y = y
 
-        # constant speeds
+        # constant speeds and accelerations
         self.SPEED = 6
         self.G = 1
         self.JUMP_SPEED = -2
         self.xACC = 0.2
+        self.DASH_SPEED = 5
+        self.DASH_CD_DEFAULT = 30
+        self.DASH_ACC = 0.65
 
         # x direction of player
         self.dirX = 0
+
+        # is player dashing
+        self.dashing = False
+        # if player dashed but doesn't release dash button, we won't let him dash
+        self.dash_enabled = True
+        # dash cooldown, interval between dashes
+        self.dash_CD = 0
 
         # direction player is facing (True if he is facing to the right)
         self.dirTowards = True
@@ -39,6 +49,11 @@ class Player(pygame.sprite.Sprite):
         # current jump speed (JUMP_SPEED for convenience)
         self.jump = self.JUMP_SPEED
 
+        # if player jumped in air we remember ticks when he did it
+        # and if he was near the surface, we perform jump anyway
+        self.jump_clicked = 0
+        self.remember_first_jump_frame = False
+
     def cut_the_frames(self, image_name):
         frame_set = pygame.image.load('data/' + image_name)
         self.animation_dir[image_name[:-4]] = []
@@ -46,7 +61,6 @@ class Player(pygame.sprite.Sprite):
             for y in range(frame_set.get_height() // self.rect.h):
                 self.animation_dir[image_name[:-4]].append(frame_set.subsurface(self.rect.w * x, self.rect.h * y,
                                                                                 self.rect.w, self.rect.h))
-                print(self.animation_dir)
 
     def animate(self):
         # в зависимости от статуса менять self.image (flip if self.dirTowards)
@@ -76,20 +90,45 @@ class Player(pygame.sprite.Sprite):
 
     def get_input(self):
         keys = pygame.key.get_pressed()
-        if keys[pygame.K_a]:
-            self.dirX -= self.xACC
-            self.dirX = -1 if self.dirX < -1 else self.dirX
-        elif keys[pygame.K_d]:
-            self.dirX += self.xACC
-            self.dirX = 1 if self.dirX > 1 else self.dirX
-        else:
-            if abs(self.dirX) - self.xACC < 0:
-                self.dirX = 0
-            else:
-                self.dirX = (self.dirX // abs(self.dirX)) * (abs(self.dirX) - self.xACC)
-        if keys[pygame.K_SPACE]:
+
+        # X MOVEMENT
+        # if player is not dashing, we check pressed keys and move player to the right or left
+        # or we stop player if both keys are pressed or none of them are
+        if not self.dashing:
+            # Left
+            if keys[pygame.K_LEFT]:
+                self.dirX -= self.xACC
+                self.dirX = -1 if self.dirX < -1 else self.dirX
+            # Right
+            if keys[pygame.K_RIGHT]:
+                self.dirX += self.xACC
+                self.dirX = 1 if self.dirX > 1 else self.dirX
+            # Stopping if both or none are pressed
+            if (not keys[pygame.K_LEFT] and not keys[pygame.K_RIGHT]) or (keys[pygame.K_LEFT] and keys[pygame.K_RIGHT]):
+                if abs(self.dirX) - self.xACC < 0:
+                    self.dirX = 0
+                else:
+                    self.dirX -= self.xACC if self.dirTowards else -self.xACC
+
+        # Jump
+        if keys[pygame.K_z]:
+            # if player clicked jump, we remember the time when he just hit the jump
+            # if he was in the air at the time, but he was near the ground, we still let him jump
+            if self.remember_first_jump_frame:
+                self.jump_clicked = pygame.time.get_ticks()
+                self.remember_first_jump_frame = False
+            # If jump is enabled, y speed is equal jump
             if self.jump:
                 self.speedY = self.jump
+        else:
+            self.remember_first_jump_frame = True
+
+        # Dash
+        # we dash if we are not dashing at the moment, dash cooldown is 0 and if player hit dash
+        # and player is not holding dash button and he touched the floor (or pogo)
+        if keys[pygame.K_c] and not self.dashing and not self.dash_CD and self.dash_enabled:
+            self.dash_enabled = False
+            self.dashing = True
 
     def update(self):
         self.animate()
@@ -101,6 +140,22 @@ class Player(pygame.sprite.Sprite):
             self.jump = 0 if self.jump < -16 else self.jump
         if self.speedY > 1:
             self.jump = 0
+
+        # dash change and stopping
+        if self.dashing:
+            # you don't fall or jump while dashing, so y speed = 0
+            # that is actually causing a bug: when you jump touching the wall and dash, you stop moving upwards
+            self.speedY = 0
+            self.dirX += self.DASH_ACC if self.dirTowards > 0 else -self.DASH_ACC
+            if abs(self.dirX) >= self.DASH_SPEED:
+                self.DASH_ACC *= -1
+            if abs(self.dirX) <= 1 and self.DASH_ACC < 0:
+                self.DASH_ACC *= -1
+                self.dirX = 1 if self.dirTowards else -1
+                self.dashing = False
+                self.dash_CD = self.DASH_CD_DEFAULT
+        if self.dash_CD:
+            self.dash_CD -= 1
 
         self.gravity()
 
@@ -115,13 +170,23 @@ class Player(pygame.sprite.Sprite):
             if axis == 'y':
                 self.rect.y = plat.rect.y - self.rect.h if self.speedY >= 0 else plat.rect.y + plat.rect.h
                 self.speedY = 0
-                if not pygame.key.get_pressed()[pygame.K_SPACE]:
+                # or (pygame.time.get_ticks() - self.jump_clicked) < 50 is needed to make jump timing bigger
+                # player will be able to jump if he hit jump button 0.05 seconds (50 ticks) before touching the ground
+                if not pygame.key.get_pressed()[pygame.K_z] or (pygame.time.get_ticks() - self.jump_clicked) < 50:
                     self.jump = self.JUMP_SPEED
+                # if player touched the ground and he doesn't hold dash button
+                if not pygame.key.get_pressed()[pygame.K_c]:
+                    self.dash_enabled = True
                 else:
                     self.jump = 0
             else:
                 self.rect.x = plat.rect.x - self.rect.w if self.dirX > 0 else plat.rect.x + plat.rect.w
                 self.dirX = 0
+                # stop dashing if hit the platform to the side
+                if self.dashing:
+                    self.dash_CD = self.DASH_CD_DEFAULT
+                self.dashing = False
+                self.DASH_ACC *= -1 if self.DASH_ACC < 0 else 1
 
     def gravity(self):
         self.speedY += self.G
@@ -130,12 +195,14 @@ class Player(pygame.sprite.Sprite):
 class Camera:
     def __init__(self):
         self.dy = 0
+        self.dx = 0
 
     def update(self):
         self.dy = height // 2 - player.rect.y - player.rect.height // 2
+        self.dx = width // 2 - player.rect.x - player.rect.w // 2
 
     def apply(self, obj):
-        obj.rect = obj.rect.move(0, self.dy)
+        obj.rect = obj.rect.move(self.dx, self.dy)
 
 
 class Level:
@@ -178,7 +245,6 @@ if __name__ == '__main__':
 
     the_level = Level()
     the_level.load_another(0)
-    the_level.load_another(1)
 
     clock = pygame.time.Clock()
 
