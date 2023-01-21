@@ -6,32 +6,49 @@ class Player(pygame.sprite.Sprite):
         super().__init__(player_group)
         self.size = (1 * PIX_IN_M, 1.5 * PIX_IN_M)
         self.image = pygame.transform.scale(pygame.image.load('data/playerDIR.png'), self.size)
-        self.rect = self.image.get_rect()
 
-        self.animation_dir = {'walk': [], 'jump': [], 'idle': [], 'fall': []}
+        # sprite rect
+        self.rect = self.image.get_rect()
+        self.rect.x = x
+        self.rect.y = y
+
+        self.animation_dir = {'walk': [], 'jump': [], 'idle': [], 'fall': [], 'hit_player': []}
         self.current_frame = 0
         self.animation_speed = 0.2
-        for i in self.animation_dir.keys():
-            self.cut_the_frames(i + '.png')
+        for j in self.animation_dir.keys():
+            self.cut_the_frames(j + '.png')
+
+        # hit animation
+        self.animation_dir['hit_slash'] = []
+        if True:
+            image_name = 'hit_slash.png'
+            frame_set = pygame.image.load('data/' + image_name)
+            self.animation_dir[image_name[:-4]] = []
+            for x in range(frame_set.get_width() // 72):
+                for y in range(frame_set.get_height() // 72):
+                    self.animation_dir[image_name[:-4]].append(frame_set.subsurface(72 * x, 72 * y,
+                                                                                    72, 72))
+            print(self.animation_dir['hit_slash'])
         # загрузить картинки с множеством кадров для каждой категории в animation_dir (.convert_alpha()!!!!!!!!)
         # поделить их на кадры и добавить в словарь
         # при надобности словарь можно дополнить нужными анимациями
 
-        # sprite rect
-        self.rect.x = x
-        self.rect.y = y
-
         # constant speeds and accelerations
         self.SPEED = 6
         self.G = 1
-        self.JUMP_SPEED = -2
+
+        self.JUMP_SPEED = -12
+        self.MAX_JUMP_TIME = 15
+
         self.xACC = 0.2
-        self.DASH_SPEED = 5
-        self.DASH_CD_DEFAULT = 30
-        self.DASH_ACC = 0.65
+        self.DASH_SPEED = 5.6
+        self.DASH_CD_DEFAULT = 15
+        self.DASH_ACC = 0.8
 
         # x direction of player
         self.dirX = 0
+        # direction player is facing (True if he is facing to the right)
+        self.dirTowards = True
 
         # is player dashing
         self.dashing = False
@@ -40,19 +57,20 @@ class Player(pygame.sprite.Sprite):
         # dash cooldown, interval between dashes
         self.dash_CD = 0
 
-        # direction player is facing (True if he is facing to the right)
-        self.dirTowards = True
-
         # player Y speed
         self.speedY = 0
 
         # current jump speed (JUMP_SPEED for convenience)
         self.jump = self.JUMP_SPEED
+        self.current_jump_time = 0
 
         # if player jumped in air we remember ticks when he did it
         # and if he was near the surface, we perform jump anyway
         self.jump_clicked = 0
         self.remember_first_jump_frame = False
+
+        # hit sprite
+        self.hit = None
 
     def cut_the_frames(self, image_name):
         frame_set = pygame.image.load('data/' + image_name)
@@ -68,15 +86,19 @@ class Player(pygame.sprite.Sprite):
         status = self.moving_status()
         self.current_frame += self.animation_speed
         self.current_frame = 0 if len(self.animation_dir[status]) <= self.current_frame else self.current_frame
+        if status == 'hit_player':
+            self.hit.animate(self.animation_dir['hit_slash'][int(self.current_frame)])
         self.image = self.animation_dir[status][int(self.current_frame)]
         if not self.dirTowards:
             self.image = pygame.transform.flip(pygame.transform.scale(self.image, self.size), True, False)
 
     def moving_status(self):
-        if self.dirX > 0:
+        if self.dirX > 0 and self.hit is None:
             self.dirTowards = True
-        elif self.dirX < 0:
+        elif self.dirX < 0 and self.hit is None:
             self.dirTowards = False
+        if self.hit is not None:
+            return 'hit_player'
         if self.speedY < 0:
             return 'jump'
         elif self.speedY == 0 and self.dirX == 0:
@@ -121,6 +143,8 @@ class Player(pygame.sprite.Sprite):
             if self.jump:
                 self.speedY = self.jump
         else:
+            if self.current_jump_time:
+                self.jump = 0
             self.remember_first_jump_frame = True
 
         # Dash
@@ -130,15 +154,20 @@ class Player(pygame.sprite.Sprite):
             self.dash_enabled = False
             self.dashing = True
 
+        if keys[pygame.K_x] and self.hit is None:
+            # hit direction
+            status = 'side' if keys[pygame.K_UP] == keys[pygame.K_DOWN] else ('up' if keys[pygame.K_UP] else 'down')
+            self.hit = Hit(status, self)
+
     def update(self):
         self.animate()
         self.get_input()
 
-        # jump change
-        if self.jump < 0:
-            self.jump -= 1
-            self.jump = 0 if self.jump < -16 else self.jump
-        if self.speedY > 1:
+        if self.current_jump_time != self.MAX_JUMP_TIME:
+            self.current_jump_time += 1
+        else:
+            self.jump = 0
+        if self.speedY > 0:
             self.jump = 0
 
         # dash change and stopping
@@ -174,22 +203,52 @@ class Player(pygame.sprite.Sprite):
                 # player will be able to jump if he hit jump button 0.05 seconds (50 ticks) before touching the ground
                 if not pygame.key.get_pressed()[pygame.K_z] or (pygame.time.get_ticks() - self.jump_clicked) < 50:
                     self.jump = self.JUMP_SPEED
+                    self.current_jump_time = 0
+                else:
+                    self.jump = 0
                 # if player touched the ground and he doesn't hold dash button
                 if not pygame.key.get_pressed()[pygame.K_c]:
                     self.dash_enabled = True
-                else:
-                    self.jump = 0
             else:
                 self.rect.x = plat.rect.x - self.rect.w if self.dirX > 0 else plat.rect.x + plat.rect.w
                 self.dirX = 0
                 # stop dashing if hit the platform to the side
                 if self.dashing:
+                    # player shouldn't be able to jump if he hits the platform while dashing
+                    self.jump = 0
                     self.dash_CD = self.DASH_CD_DEFAULT
                 self.dashing = False
                 self.DASH_ACC *= -1 if self.DASH_ACC < 0 else 1
 
     def gravity(self):
         self.speedY += self.G
+
+
+class Hit(pygame.sprite.Sprite):
+    def __init__(self, status, player_obj):
+        super().__init__(player_group)
+        self.parent = player_obj
+        self.image = pygame.image.load(f'data/{status}_hit.png')
+        if not self.parent.dirTowards:
+            self.image = pygame.transform.flip(self.image, True, False)
+        self.rect = self.image.get_rect()
+        self.mask = self.image.get_masks()
+        self.rect.x, self.rect.y = {'side': (self.parent.rect.x + (self.parent.rect.w if self.parent.dirTowards
+                                                                   else -self.rect.w), self.parent.rect.y),
+                                    'up': (self.parent.rect.x, self.parent.rect.y - self.rect.h),
+                                    'down': (self.parent.rect.x, self.parent.rect.y + self.parent.rect.h)}[status]
+        self.time = 0
+
+    def animate(self, img):
+        self.image = img
+        if not self.parent.dirTowards:
+            self.image = pygame.transform.flip(self.image, True, False)
+
+    def update(self):
+        self.time += 1
+        if self.time == 30:
+            self.parent.hit = None
+            self.kill()
 
 
 class Camera:
@@ -212,15 +271,32 @@ class Level:
 
     def load_level(self, name):
         with open(name) as level:
-            for y, st in enumerate(level.readlines()):
+            level_lines = level.readlines()
+            for y, st in enumerate(level_lines):
                 for x, elem in enumerate(st):
-                    if elem == '#':
+                    if elem in '-_|':
                         a = pygame.sprite.Sprite(platform_group)
-                        a.image = pygame.transform.scale(pygame.image.load('data/player.png'),
+                        a.image = pygame.transform.scale(pygame.image.load('data/grass_floor.png'),
                                                          (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
+                        a.image = pygame.transform.rotate(a.image, 0 if elem == '-' else (180 if elem == '_' else
+                                                                                          (90 if
+                                                                                           level_lines[y][x + 1] == '#'
+                                                                                           else -90)))
                         a.rect = a.image.get_rect()
                         a.rect.x = x * 0.5 * PIX_IN_M
                         a.rect.y = y * 0.5 * PIX_IN_M
+                    elif elem == '#':
+                        a = pygame.sprite.Sprite(platform_group)
+                        a.image = pygame.transform.scale(pygame.surface.Surface((x * 0.5 * PIX_IN_M,
+                                                                                 y * 0.5 * PIX_IN_M)),
+                                                         (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
+                        a.image.fill('black')
+                        a.rect = a.image.get_rect()
+                        a.rect.x = x * 0.5 * PIX_IN_M
+                        a.rect.y = y * 0.5 * PIX_IN_M
+                    elif elem == '@':
+                        global player
+                        player = Player(x * 0.5 * PIX_IN_M, y * 0.5 * PIX_IN_M)
 
     def load_another(self, next_prev):
         self.load_level(self.level_names[self.current_level + next_prev])
@@ -237,14 +313,13 @@ if __name__ == '__main__':
     screen = pygame.display.set_mode(size)
 
     player_group = pygame.sprite.Group()
-    player = Player(50, 180)
 
     platform_group = pygame.sprite.Group()
 
-    camera = Camera()
-
     the_level = Level()
-    the_level.load_another(0)
+    the_level.load_another(1)
+
+    camera = Camera()
 
     clock = pygame.time.Clock()
 
