@@ -1,11 +1,13 @@
 import pygame
+import os
+PIX_IN_M = 72
 
 
 class Player(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__(player_group)
         self.size = (1 * PIX_IN_M, 1.5 * PIX_IN_M)
-        self.image = pygame.transform.scale(pygame.image.load('data/playerDIR.png'), self.size)
+        self.image = pygame.transform.scale(pygame.image.load('data/textures/playerDIR.png'), self.size)
 
         # sprite rect
         self.rect = self.image.get_rect()
@@ -16,25 +18,11 @@ class Player(pygame.sprite.Sprite):
         # this position will be updated to the areas coords
         self.respawn_pos = (x, y)
 
-        self.animation_dir = {'walk': [], 'jump': [], 'idle': [], 'fall': [], 'hit_player': []}
+        self.animation_dir = {'walk': [], 'jump': [], 'idle': [], 'fall': []}
         self.current_frame = 0
         self.animation_speed = 0.15
         for j in self.animation_dir.keys():
             self.cut_the_frames(j + '.png')
-
-        # hit animation
-        self.animation_dir['hit_slash'] = []
-        if True:
-            image_name = 'hit_slash.png'
-            frame_set = pygame.image.load('data/' + image_name)
-            self.animation_dir[image_name[:-4]] = []
-            for y in range(frame_set.get_height() // 72):
-                for x in range(frame_set.get_width() // 72):
-                    self.animation_dir[image_name[:-4]].append(frame_set.subsurface(72 * x, 72 * y,
-                                                                                    72, 72))
-        # загрузить картинки с множеством кадров для каждой категории в animation_dir (.convert_alpha()!!!!!!!!)
-        # поделить их на кадры и добавить в словарь
-        # при надобности словарь можно дополнить нужными анимациями
 
         # constant speeds and accelerations
         self.SPEED = 6
@@ -47,7 +35,6 @@ class Player(pygame.sprite.Sprite):
         self.DASH_SPEED = 5.6
         self.DASH_CD_DEFAULT = 15
         self.DASH_ACC = 0.8
-        self.HIT_CD_DEFAULT = 25
 
         # x direction of player
         self.dirX = 0
@@ -73,15 +60,8 @@ class Player(pygame.sprite.Sprite):
         self.jump_clicked = 0
         self.remember_first_jump_frame = False
 
-        # hit sprite
-        self.hit = None
-        # if player made a hit and didn't let go of hit button we don't allow hit
-        # also can be used in friendly areas and so on
-        self.allow_hit = True
-        self.hit_CD = 0
-
     def cut_the_frames(self, image_name):
-        frame_set = pygame.image.load('data/' + image_name)
+        frame_set = pygame.image.load('data/textures/' + image_name)
         self.animation_dir[image_name[:-4]] = []
         for y in range(frame_set.get_height() // self.rect.h):
             for x in range(frame_set.get_width() // self.rect.w):
@@ -94,23 +74,15 @@ class Player(pygame.sprite.Sprite):
         status = self.moving_status()
         self.current_frame += self.animation_speed
         self.current_frame = 0 if len(self.animation_dir[status]) <= self.current_frame else self.current_frame
-        if status == 'hit_player':
-            self.hit.animate(self.animation_dir['hit_slash'][int(self.current_frame)])
-            if self.current_frame > len(self.animation_dir['hit_slash']) - self.animation_speed * 2:
-                self.hit.kill()
-                self.hit = None
-                self.hit_CD = self.HIT_CD_DEFAULT
         self.image = self.animation_dir[status][int(self.current_frame)]
         if not self.dirTowards:
             self.image = pygame.transform.flip(pygame.transform.scale(self.image, self.size), True, False)
 
     def moving_status(self):
-        if self.dirX > 0 and self.hit is None:
+        if self.dirX > 0:
             self.dirTowards = True
-        elif self.dirX < 0 and self.hit is None:
+        elif self.dirX < 0:
             self.dirTowards = False
-        if self.hit is not None:
-            return 'hit_player'
         if self.speedY < 0:
             return 'jump'
         elif self.speedY == 0 and self.dirX == 0:
@@ -166,17 +138,6 @@ class Player(pygame.sprite.Sprite):
             self.dash_enabled = False
             self.dashing = True
 
-        # we create hit sprite if we can hit
-        if keys[pygame.K_x] and self.allow_hit and self.hit is None:
-            # hit direction
-            status = 'side' if keys[pygame.K_UP] == keys[pygame.K_DOWN] else ('up' if keys[pygame.K_UP] else 'down')
-            self.hit = Hit(status, self)
-            self.allow_hit = False
-            # hit cooldown will be started as soon as hit is KILLED
-        elif not keys[pygame.K_x] and not self.hit_CD:
-            self.allow_hit = True
-        # print(self.hit_CD, keys[pygame.K_x], self.hit, self.allow_hit)
-
     def update(self):
         self.animate()
         self.get_input()
@@ -203,8 +164,6 @@ class Player(pygame.sprite.Sprite):
                 self.dash_CD = self.DASH_CD_DEFAULT
         if self.dash_CD:
             self.dash_CD -= 1
-        if self.hit_CD:
-            self.hit_CD -= 1
 
         self.gravity()
 
@@ -216,8 +175,11 @@ class Player(pygame.sprite.Sprite):
         # we need to move respawn position with camera movement so that will remain in place
         global camera
         self.respawn_pos = (self.respawn_pos[0] + camera.dx, self.respawn_pos[1] + camera.dy)
+
         if pygame.sprite.spritecollideany(self, spike_group):
             self.respawn()
+        if pygame.sprite.spritecollideany(self, transition_group):
+            self.transition(pygame.sprite.spritecollide(self, transition_group, False)[0])
 
     def collision(self, axis):
         if pygame.sprite.spritecollide(self, platform_group, False):
@@ -249,31 +211,29 @@ class Player(pygame.sprite.Sprite):
     def respawn(self):
         # this method respawns player on last respawn area
         # if player falls in the spikes he will be respawned
-        pygame.time.delay(300)
+        self.dashing = False
+        self.dash_CD = 0
+        self.dash_enabled = True
+
+        self.speedY = 0
+        self.dirX = 0
+
+        pygame.time.delay(50)
         self.rect.x, self.rect.y = self.respawn_pos
+
+    def transition(self, trans_sprite):
+        global the_level, text_surface, my_font
+        if the_level.current_level == 0:
+            text_surface = my_font.render('"c" - dash', False, (0, 0, 0))
+        elif the_level.current_level == 2:
+            text_surface = my_font.render('YOU WON!!!!!!!!!', False, (0, 0, 0))
+        else:
+            text_surface = my_font.render('', False, (0, 0, 0))
+        the_level.load_level(the_level.current_level + 1 if trans_sprite.chr == 'n' else -1)
 
     def gravity(self):
         self.speedY += self.G
         self.speedY = 30 if self.speedY > 30 else self.speedY
-
-
-class Hit(pygame.sprite.Sprite):
-    def __init__(self, status, player_obj):
-        super().__init__(player_group)
-        self.parent = player_obj
-        self.image = pygame.transform.flip(self.parent.animation_dir['hit_slash'][0],
-                                           False if self.parent.dirTowards else True, False)
-        self.rect = self.image.get_rect()
-        self.mask = self.image.get_masks()
-        self.rect.x, self.rect.y = {'side': (self.parent.rect.x + (self.parent.rect.w if self.parent.dirTowards
-                                                                   else -self.rect.w), self.parent.rect.y),
-                                    'up': (self.parent.rect.x, self.parent.rect.y - self.rect.h),
-                                    'down': (self.parent.rect.x, self.parent.rect.y + self.parent.rect.h)}[status]
-
-    def animate(self, img):
-        self.image = img
-        if not self.parent.dirTowards:
-            self.image = pygame.transform.flip(self.image, True, False)
 
 
 class Camera:
@@ -289,53 +249,84 @@ class Camera:
         obj.rect = obj.rect.move(self.dx, self.dy)
 
 
+class Transition(pygame.sprite.Sprite):
+    def __init__(self, chr):
+        super().__init__(transition_group)
+        self.chr = chr
+
+
 class Level:
     def __init__(self, start_level=0):
         self.current_level = start_level
-        self.level_names = ['data/' + lev_name for lev_name in ['lev.txt', 'lev2.txt']]
+        self.level_names = ['data/levels/' + i for i in list(os.walk('data/levels/'))[0][2]]
 
-    def load_level(self, name):
-        with open(name) as level:
-            level_lines = level.readlines()
+    def load_level(self, index):
+        self.unload_level()
+
+        self.current_level = index
+        with open(self.level_names[index]) as level:
+            level_lines = [i.strip() for i in level.readlines()]
             for y, st in enumerate(level_lines):
                 for x, elem in enumerate(st):
-                    if elem in '-_|':
-                        # creating platform. Floor if '-', ceiling if '_', side if '|'
-                        a = pygame.sprite.Sprite(platform_group)
-                        a.image = pygame.transform.scale(pygame.image.load('data/grass_floor.png'),
-                                                         (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
-                        # rotate floor texture by 90, 270 if that is side, 180 if it is ceiling
-                        a.image = pygame.transform.rotate(a.image, 0 if elem == '-' else (180 if elem == '_' else
-                                                                                          (90 if
-                                                                                           level_lines[y][x + 1] == '#'
-                                                                                           else -90)))
-                        a.rect = a.image.get_rect()
-                        a.rect.x = x * 0.5 * PIX_IN_M
-                        a.rect.y = y * 0.5 * PIX_IN_M
-                    elif elem == '#':
-                        # blocks at the center of a platform
-                        a = pygame.sprite.Sprite(platform_group)
-                        a.image = pygame.transform.scale(pygame.surface.Surface((x * 0.5 * PIX_IN_M,
-                                                                                 y * 0.5 * PIX_IN_M)),
-                                                         (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
-                        a.image.fill('black')
-                        a.rect = a.image.get_rect()
-                        a.rect.x = x * 0.5 * PIX_IN_M
-                        a.rect.y = y * 0.5 * PIX_IN_M
-                    elif elem == '@':
+
+                    # create basic tile
+                    # then change tile image according to its role (symbol)
+                    tile = pygame.sprite.Sprite()
+                    tile.rect = pygame.rect.Rect(x * 0.5 * PIX_IN_M, y * 0.5 * PIX_IN_M, 0.5 * PIX_IN_M, 0.5 * PIX_IN_M)
+
+                    if elem == '@':
+                        # if it is @ then we should create player sprite at these coordinates
                         # player spawn
+                        print('addddd')
                         global player
                         player = Player(x * 0.5 * PIX_IN_M, y * 0.5 * PIX_IN_M)
-                    elif elem == 's':
-                        a = pygame.sprite.Sprite(spike_group)
-                        a.image = pygame.transform.scale(pygame.image.load('data/spike.png'),
-                                                         (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
-                        a.rect = a.image.get_rect()
-                        a.rect.x, a.rect.y = 0.5 * PIX_IN_M * x, 0.5 * PIX_IN_M * y
 
-    def load_another(self, next_prev):
-        self.load_level(self.level_names[self.current_level + next_prev])
-        self.current_level += next_prev
+                    elif elem in '-_|':
+                        # creating platform. Floor if '-', ceiling if '_', side if '|'
+                        tile.image = pygame.transform.scale(pygame.image.load('data/textures/grass_floor.png'),
+                                                            (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
+
+                        # rotate floor texture by 90, 270 if that is side, 180 if it is ceiling
+                        tile.image = pygame.transform.rotate(tile.image, 0 if elem == '-' else (
+                            180 if elem == '_' else (90 if level_lines[y][x + 1] == '#' else -90)))
+
+                        platform_group.add(tile)
+
+                    elif elem == '#':
+                        # blocks at the center of a platform
+                        tile.image = pygame.transform.scale(pygame.surface.Surface((x * 0.5 * PIX_IN_M,
+                                                                                    y * 0.5 * PIX_IN_M)),
+                                                            (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
+                        tile.image.fill('black')
+
+                        platform_group.add(tile)
+
+                    elif elem == 's':
+                        tile.image = pygame.transform.scale(pygame.image.load('data/textures/spike.png'),
+                                                            (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
+                        if level_lines[y - 1][x] == '#':
+                            tile.image = pygame.transform.rotate(tile.image, 180)
+
+                        spike_group.add(tile)
+
+                    elif elem in 'np':
+                        tile_rect = tile.rect
+                        if elem == 'n':
+                            tile = Transition('n')
+                        else:
+                            tile = Transition('p')
+                        tile.rect = tile_rect
+                        tile.image = pygame.transform.scale(pygame.image.load('data/textures/transit.png'),
+                                                            (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
+                        transition_group.add(tile)
+
+    def unload_level(self):
+        for i in [platform_group, spike_group, transition_group, player_group]:
+            for j in i:
+                j.kill()
+
+    def get_current(self):
+        return self.current_level
 
 
 if __name__ == '__main__':
@@ -343,7 +334,7 @@ if __name__ == '__main__':
 
     # screen:
     size = width, height = 1280, 800
-    PIX_IN_M = 72
+    pygame.display.set_caption('4-LEVEL GAME!!!!!!!!')
     # = height * 72 / 1080
     screen = pygame.display.set_mode(size)
 
@@ -351,13 +342,19 @@ if __name__ == '__main__':
 
     platform_group = pygame.sprite.Group()
     spike_group = pygame.sprite.Group()
+    transition_group = pygame.sprite.Group()
 
     the_level = Level()
-    the_level.load_another(1)
+    the_level.load_level(2)
 
     camera = Camera()
 
     clock = pygame.time.Clock()
+
+    # text
+    pygame.font.init()
+    my_font = pygame.font.SysFont('Times New Roman', 25)
+    text_surface = my_font.render('"←", "→" - move, "z" - jump', False, (0, 0, 0))
 
     running = True
     while running:
@@ -368,10 +365,9 @@ if __name__ == '__main__':
         player_group.update()
 
         camera.update()
-        for i in platform_group:
-            camera.apply(i)
-        for i in spike_group:
-            camera.apply(i)
+        for group in [platform_group, spike_group, transition_group]:
+            for i in group:
+                camera.apply(i)
         camera.apply(player)
 
         clock.tick(60)
@@ -380,4 +376,8 @@ if __name__ == '__main__':
         platform_group.draw(screen)
         spike_group.draw(screen)
         player_group.draw(screen)
+        transition_group.draw(screen)
+
+        screen.blit(text_surface, (0, 0))
+
         pygame.display.flip()
