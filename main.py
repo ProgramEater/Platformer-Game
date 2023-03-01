@@ -345,7 +345,7 @@ if __name__ == '__main__':
     transition_group = pygame.sprite.Group()
 
     the_level = Level()
-    the_level.load_level(2)
+    the_level.load_level(0)
 
     camera = Camera()
 
