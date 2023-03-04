@@ -7,7 +7,7 @@ class Player(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__(player_group)
         self.size = (1 * PIX_IN_M, 1.5 * PIX_IN_M)
-        self.image = pygame.transform.scale(pygame.image.load('data/textures/spike.png'), self.size)
+        self.image = pygame.Surface(self.size)
 
         # sprite rect
         self.rect = self.image.get_rect()
@@ -26,7 +26,7 @@ class Player(pygame.sprite.Sprite):
 
         # constant speeds and accelerations
         self.SPEED = 6
-        self.G = 1.4
+        self.G = 1.3
 
         self.JUMP_SPEED = -12.5
         self.MAX_JUMP_TIME = 15
@@ -109,7 +109,7 @@ class Player(pygame.sprite.Sprite):
                 self.dirX += self.xACC
                 self.dirX = 1 if self.dirX > 1 else self.dirX
             # Stopping if both or none are pressed
-            if (not keys[pygame.K_LEFT] and not keys[pygame.K_RIGHT]) or (keys[pygame.K_LEFT] and keys[pygame.K_RIGHT]):
+            if keys[pygame.K_LEFT] == keys[pygame.K_RIGHT]:
                 if abs(self.dirX) - self.xACC < 0:
                     self.dirX = 0
                 else:
@@ -184,7 +184,15 @@ class Player(pygame.sprite.Sprite):
         if pygame.sprite.spritecollideany(self, spike_group):
             self.respawn()
         if pygame.sprite.spritecollideany(self, transition_group):
-            self.transition(pygame.sprite.spritecollide(self, transition_group, False)[0])
+            transition = pygame.sprite.spritecollide(self, transition_group, False)[0]
+            self.transition(transition)
+
+    def stop_player(self):
+        self.dirX = 0
+        self.jump = 0
+        self.dashing = False
+        self.hit_sprite.deactivate()
+        self.speedY = 0
 
     def collision(self, axis):
         if pygame.sprite.spritecollide(self, platform_group, False):
@@ -235,7 +243,10 @@ class Player(pygame.sprite.Sprite):
             text_surface = my_font.render('YOU WON!!!!!!!!!', False, (0, 0, 0))
         else:
             text_surface = my_font.render('', False, (0, 0, 0))
-        the_level.load_level(the_level.current_level + 1 if trans_sprite.chr == 'n' else -1)
+        the_level.transitioning_from = the_level.current_level
+        self.stop_player()
+        the_level.load_level(trans_sprite.next_level_ind)
+        print(self.rect.y)
 
     def gravity(self):
         self.speedY += self.G
@@ -243,7 +254,7 @@ class Player(pygame.sprite.Sprite):
 
 
 class Hit(pygame.sprite.Sprite):
-    def __init__(self, player):
+    def __init__(self, player_sp):
         super().__init__(hit_group)
 
         # create transparent surface for hit whenever it isn't active
@@ -263,7 +274,7 @@ class Hit(pygame.sprite.Sprite):
         self.current_frame = 0
 
         # sprite of sender (Hit sprite is created in player)
-        self.player = player
+        self.player = player_sp
 
         # direction of hit
         self.dir = None
@@ -302,7 +313,6 @@ class Hit(pygame.sprite.Sprite):
 
         # enable hit if hit button is released
         if not self.hit_enabled and not keys[pygame.K_x]:
-            print('ad')
             self.hit_enabled = True
 
         self.pogo()
@@ -344,15 +354,38 @@ class Camera:
 
 
 class Transition(pygame.sprite.Sprite):
-    def __init__(self, sym):
+    def __init__(self, next_level_ind, direction, x, y, wall_to):
         super().__init__(transition_group)
-        self.chr = sym
+        self.next_level_ind = next_level_ind
+
+        self.dir = direction
+
+        # direction of neares to the transition wall (if player goes right to get in it is 'r', wall to the left - 'l'
+        # up - 'u', down - 'd'
+        self.wall_to = wall_to
+
+        self.image = pygame.transform.scale(pygame.image.load('data/textures/transit.png'),
+                                            (PIX_IN_M * 0.5 * (5 if direction == 'h' else 1),
+                                             PIX_IN_M * 0.5 * (5 if direction == 'v' else 1)))
+
+        # sprite coords (x, y - coordinates of the middle digit in transition definition in text file)
+        # if transit is vertical we need to move it closer to the wall, so that it would touch it
+        # if it is horizontal we need to move it to the right so that it also would touch right wall
+        x_coord = (x + (1 if self.wall_to == 'r' else -1)) if direction == 'v' else x - 2
+        y_coord = (y - (2 if direction == 'v' else 0))
+
+        self.rect = pygame.rect.Rect(x_coord * 0.5 * PIX_IN_M, y_coord * 0.5 * PIX_IN_M, *self.image.get_size())
 
 
 class Level:
     def __init__(self, start_level=0):
         self.current_level = start_level
+        # list of level names in from 0 to more...
         self.level_names = ['data/levels/' + i for i in list(os.walk('data/levels/'))[0][2]]
+
+        # index of a level that player left when he transitioned
+        # None - if he didn't come from another lvl but was teleported or died and so on
+        self.transitioning_from = None
 
     def load_level(self, index):
         self.unload_level()
@@ -368,12 +401,12 @@ class Level:
                     tile = pygame.sprite.Sprite()
                     tile.rect = pygame.rect.Rect(x * 0.5 * PIX_IN_M, y * 0.5 * PIX_IN_M, 0.5 * PIX_IN_M, 0.5 * PIX_IN_M)
 
-                    if elem == '@':
+                    if elem == '@' and self.transitioning_from is None:
                         # if it is @ then we should create player sprite at these coordinates
                         # player spawn
-                        print('addddd')
                         global player
-                        player = Player(x * 0.5 * PIX_IN_M, y * 0.5 * PIX_IN_M)
+                        player.rect.x, player.rect.y = x * 0.5 * PIX_IN_M, y * 0.5 * PIX_IN_M
+                        player.respawn_pos = (x * 0.5 * PIX_IN_M, y * 0.5 * PIX_IN_M)
 
                     elif elem in '-_|':
                         # creating platform. Floor if '-', ceiling if '_', side if '|'
@@ -396,6 +429,7 @@ class Level:
                         platform_group.add(tile)
 
                     elif elem == 's':
+                        # spikes
                         tile.image = pygame.transform.scale(pygame.image.load('data/textures/spike.png'),
                                                             (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
                         if level_lines[y - 1][x] == '#':
@@ -403,19 +437,52 @@ class Level:
 
                         spike_group.add(tile)
 
-                    elif elem in 'np':
-                        tile_rect = tile.rect
-                        if elem == 'n':
-                            tile = Transition('n')
-                        else:
-                            tile = Transition('p')
-                        tile.rect = tile_rect
-                        tile.image = pygame.transform.scale(pygame.image.load('data/textures/transit.png'),
-                                                            (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
-                        transition_group.add(tile)
+                    elif elem.isdigit():
+                        # transitions
+                        # if we find digit it means we need to place transition
+                        # transition is going to be defined with 3 symbols: direction letter and a number (from 0 to 99)
+                        # direction letter - 'h' or 'v' (horizontal or vertical)
+
+                        # number is the number of level where transition leads to
+                        # (so index in self.level_names is number - 1)
+
+                        # ex: h12 - horizontal transition to lvl 13 (index - 12), v02 - vertical transition to lvl 2
+
+                        transit_def = st[x - 1:x + 2]
+
+                        # if transit_def[0] is not v or h that means that in h12 the elem is not 1 but 2
+                        # and transit_def in fact is 12. so transition was already created 1 iteration (step) before
+                        if transit_def[0] in 'hv':
+                            wall_to = ('u' if level_lines[y - 1][x] == '#' else 'd') \
+                                if transit_def[0] == 'h' else ('r' if st[x + 2] == '#' else 'l')
+                            tile = Transition(int(transit_def[1:]) - 1, transit_def[0], x, y, wall_to)
+                            transition_group.add(tile)
+
+            # if player was not teleported to spawn location because he transitioned from another lvl, we teleport him
+            if self.transitioning_from is not None:
+                transit_spr = [i for i in transition_group][list(map(lambda i: i.next_level_ind,
+                                                                     transition_group)).index(self.transitioning_from)]
+                self.transition_player(transit_spr)
+
+    def transition_player(self, transit_spr):
+        if transit_spr.dir == 'v':
+            # put player to the side of transit
+            p_x = transit_spr.rect.x + PIX_IN_M * (-1.5 if transit_spr.wall_to == 'r' else 1)
+            # put player on the floor
+            p_y = transit_spr.rect.y + 1 * PIX_IN_M
+        else:
+            if transit_spr.wall_to == 'u':
+                p_x = transit_spr.rect.x + 1 * PIX_IN_M
+                p_y = transit_spr.rect.y + 3 * PIX_IN_M
+            else:
+                p_x = transit_spr.rect.x + PIX_IN_M * (3.5 if player.dirTowards else -1)
+                p_y = transit_spr.rect.y - 2 * PIX_IN_M
+
+        player.rect.x, player.rect.y = p_x, p_y
+        self.transitioning_from = None
 
     def unload_level(self):
-        for i in [platform_group, spike_group, transition_group, player_group]:
+        for i in [platform_group, spike_group, transition_group]:
             for j in i:
                 j.kill()
 
@@ -449,8 +516,9 @@ if __name__ == '__main__':
     transition_group = pygame.sprite.Group()
     hit_group = pygame.sprite.Group()
 
+    player = Player(0, 0)
     the_level = Level()
-    the_level.load_level(2)
+    the_level.load_level(0)
 
     camera = Camera()
 
@@ -480,10 +548,10 @@ if __name__ == '__main__':
 
         screen.fill((255, 255, 255))
 
+        transition_group.draw(screen)
         platform_group.draw(screen)
         spike_group.draw(screen)
         player_group.draw(screen)
-        transition_group.draw(screen)
         hit_group.draw(screen)
 
         screen.blit(text_surface, (0, 0))
