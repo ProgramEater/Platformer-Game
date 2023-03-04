@@ -7,7 +7,7 @@ class Player(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__(player_group)
         self.size = (1 * PIX_IN_M, 1.5 * PIX_IN_M)
-        self.image = pygame.transform.scale(pygame.image.load('data/textures/playerDIR.png'), self.size)
+        self.image = pygame.transform.scale(pygame.image.load('data/textures/spike.png'), self.size)
 
         # sprite rect
         self.rect = self.image.get_rect()
@@ -22,7 +22,7 @@ class Player(pygame.sprite.Sprite):
         self.current_frame = 0
         self.animation_speed = 0.15
         for j in self.animation_dir.keys():
-            self.cut_the_frames(j + '.png')
+            self.animation_dir[j] = cut_the_frames(f'data/textures/{j}.png', self.rect.w, self.rect.h)
 
         # constant speeds and accelerations
         self.SPEED = 6
@@ -36,7 +36,7 @@ class Player(pygame.sprite.Sprite):
         self.DASH_CD_DEFAULT = 15
         self.DASH_ACC = 0.8
 
-        # x direction of player
+        # x speed of player
         self.dirX = 0
         # direction player is facing (True if he is facing to the right)
         self.dirTowards = True
@@ -60,13 +60,12 @@ class Player(pygame.sprite.Sprite):
         self.jump_clicked = 0
         self.remember_first_jump_frame = False
 
-    def cut_the_frames(self, image_name):
-        frame_set = pygame.image.load('data/textures/' + image_name)
-        self.animation_dir[image_name[:-4]] = []
-        for y in range(frame_set.get_height() // self.rect.h):
-            for x in range(frame_set.get_width() // self.rect.w):
-                self.animation_dir[image_name[:-4]].append(frame_set.subsurface(self.rect.w * x, self.rect.h * y,
-                                                                                self.rect.w, self.rect.h))
+        # this variable contains hit sprite. If it's None => we are not hitting otherwise we do
+        self.hit_sprite = Hit(self)
+
+        # speed of knockback when target is hit
+        self.hit_pogo_speed_y = 20
+        self.hit_pogo_speed_x = 2
 
     def animate(self):
         # в зависимости от статуса менять self.image (flip if self.dirTowards)
@@ -79,9 +78,9 @@ class Player(pygame.sprite.Sprite):
             self.image = pygame.transform.flip(pygame.transform.scale(self.image, self.size), True, False)
 
     def moving_status(self):
-        if self.dirX > 0:
+        if self.dirX > 0 and not self.hit_sprite.active:
             self.dirTowards = True
-        elif self.dirX < 0:
+        elif self.dirX < 0 and not self.hit_sprite.active:
             self.dirTowards = False
         if self.speedY < 0:
             return 'jump'
@@ -138,10 +137,14 @@ class Player(pygame.sprite.Sprite):
             self.dash_enabled = False
             self.dashing = True
 
+        if not self.dashing and keys[pygame.K_x] and not self.hit_sprite.active:
+            self.hit_sprite.activate('up' if keys[pygame.K_UP] else 'down' if keys[pygame.K_DOWN] else 'side')
+
     def update(self):
         self.animate()
         self.get_input()
 
+        # jump time and update
         if self.current_jump_time != self.MAX_JUMP_TIME:
             self.current_jump_time += 1
         else:
@@ -149,7 +152,7 @@ class Player(pygame.sprite.Sprite):
         if self.speedY > 0:
             self.jump = 0
 
-        # dash change and stopping
+        # dash update and stopping
         if self.dashing:
             # you don't fall or jump while dashing, so y speed = 0
             # that is actually causing a bug: when you jump touching the wall and dash, you stop moving upwards
@@ -167,15 +170,17 @@ class Player(pygame.sprite.Sprite):
 
         self.gravity()
 
+        # calculate collisions
         self.rect.y += self.speedY
         self.collision('y')
         self.rect.x += self.dirX * self.SPEED
         self.collision('x')
 
-        # we need to move respawn position with camera movement so that will remain in place
+        # updating respawn position
         global camera
         self.respawn_pos = (self.respawn_pos[0] + camera.dx, self.respawn_pos[1] + camera.dy)
 
+        # collision with spikes transitions and so on
         if pygame.sprite.spritecollideany(self, spike_group):
             self.respawn()
         if pygame.sprite.spritecollideany(self, transition_group):
@@ -217,6 +222,7 @@ class Player(pygame.sprite.Sprite):
 
         self.speedY = 0
         self.dirX = 0
+        self.jump = 0
 
         pygame.time.delay(50)
         self.rect.x, self.rect.y = self.respawn_pos
@@ -236,6 +242,94 @@ class Player(pygame.sprite.Sprite):
         self.speedY = 30 if self.speedY > 30 else self.speedY
 
 
+class Hit(pygame.sprite.Sprite):
+    def __init__(self, player):
+        super().__init__(hit_group)
+
+        # create transparent surface for hit whenever it isn't active
+        self.transp_surface = pygame.Surface((PIX_IN_M, PIX_IN_M), pygame.SRCALPHA)
+        self.transp_surface.convert_alpha()
+
+        self.rect = pygame.rect.Rect(0, 0, PIX_IN_M, PIX_IN_M)
+        self.image = self.transp_surface
+
+        self.active = False
+
+        self.animation_dir = {}
+
+        for i in ['side', 'up', 'down']:
+            self.animation_dir[i] = cut_the_frames(f'data/textures/{i}_slash.png', self.rect.w, self.rect.h)
+
+        self.current_frame = 0
+
+        # sprite of sender (Hit sprite is created in player)
+        self.player = player
+
+        # direction of hit
+        self.dir = None
+        # if hit button is not released player can't hit
+        self.hit_enabled = True
+
+        # hit speed (hit time in ticks is --- self.hit_speed * len(self.frames)
+        self.hit_speed = 0.4
+
+    def activate(self, direction):
+        if self.hit_enabled:
+            self.active = True
+            self.dir = direction
+            self.hit_enabled = False
+
+    def deactivate(self):
+        self.active = False
+        self.current_frame = 0
+        self.image = self.transp_surface
+
+    def update(self):
+        keys = pygame.key.get_pressed()
+
+        # position update
+        if not self.active:
+            if keys[pygame.K_DOWN] == keys[pygame.K_UP]:
+                self.rect.y = self.player.rect.y
+                self.rect.x = (self.player.rect.x + self.player.rect.w) if self.player.dirTowards \
+                    else (self.player.rect.x - self.player.rect.w)
+            elif keys[pygame.K_DOWN]:
+                self.rect.y, self.rect.x = self.player.rect.y + self.player.rect.h, self.player.rect.x
+            elif keys[pygame.K_UP]:
+                self.rect.y, self.rect.x = self.player.rect.y - self.rect.h, self.player.rect.x
+        else:
+            self.animate()
+
+        # enable hit if hit button is released
+        if not self.hit_enabled and not keys[pygame.K_x]:
+            print('ad')
+            self.hit_enabled = True
+
+        self.pogo()
+
+    def animate(self):
+        self.current_frame += self.hit_speed
+        if self.current_frame >= len(self.animation_dir[self.dir]):
+            self.current_frame = 0
+            self.active = False
+            self.image = self.transp_surface
+        else:
+            self.image = self.animation_dir[self.dir][int(self.current_frame)]
+            self.image = pygame.transform.flip(self.image, True, False) if not self.player.dirTowards else self.image
+
+    # if player hits spike or enemy ge should get knockback (be pushed away from hit target)
+    def pogo(self):
+        if pygame.sprite.spritecollideany(self, spike_group) and self.active:
+            self.player.dirX = self.player.hit_pogo_speed_x * (1 if self.dir == 'side' and not self.player.dirTowards
+                                                               else -1 if self.dir == 'side' else 0)
+            self.player.speedY = self.player.hit_pogo_speed_y * (1 if self.dir == 'up'
+                                                                 else (-1 if self.dir == 'down' else 0))
+            self.deactivate()
+            self.player.dash_enabled = True
+            self.player.dash_CD = 0
+            self.player.jump = 0 if self.dir == 'down' or self.dir == 'up' else self.player.jump
+
+
 class Camera:
     def __init__(self):
         self.dy = 0
@@ -250,9 +344,9 @@ class Camera:
 
 
 class Transition(pygame.sprite.Sprite):
-    def __init__(self, chr):
+    def __init__(self, sym):
         super().__init__(transition_group)
-        self.chr = chr
+        self.chr = sym
 
 
 class Level:
@@ -329,6 +423,16 @@ class Level:
         return self.current_level
 
 
+# this function takes an image and then cuts in tiles with tiles size (then the set of these tiles is returned)
+def cut_the_frames(path, tile_w, tile_h):
+    frame_set = pygame.image.load(path)
+    frames = []
+    for y in range(frame_set.get_height() // tile_h):
+        for x in range(frame_set.get_width() // tile_w):
+            frames.append(frame_set.subsurface(tile_w * x, tile_h * y, tile_w, tile_h))
+    return frames
+
+
 if __name__ == '__main__':
     pygame.init()
 
@@ -343,9 +447,10 @@ if __name__ == '__main__':
     platform_group = pygame.sprite.Group()
     spike_group = pygame.sprite.Group()
     transition_group = pygame.sprite.Group()
+    hit_group = pygame.sprite.Group()
 
     the_level = Level()
-    the_level.load_level(0)
+    the_level.load_level(2)
 
     camera = Camera()
 
@@ -362,6 +467,7 @@ if __name__ == '__main__':
             if event.type == pygame.QUIT:
                 running = False
 
+        hit_group.update()
         player_group.update()
 
         camera.update()
@@ -373,10 +479,12 @@ if __name__ == '__main__':
         clock.tick(60)
 
         screen.fill((255, 255, 255))
+
         platform_group.draw(screen)
         spike_group.draw(screen)
         player_group.draw(screen)
         transition_group.draw(screen)
+        hit_group.draw(screen)
 
         screen.blit(text_surface, (0, 0))
 
