@@ -178,7 +178,8 @@ class Player(pygame.sprite.Sprite):
 
         # updating respawn position
         global camera
-        self.respawn_pos = (self.respawn_pos[0] + camera.dx, self.respawn_pos[1] + camera.dy)
+        self.respawn_pos = (self.respawn_pos[0] + camera.dx + camera.x_shift,
+                            self.respawn_pos[1] + camera.dy + camera.y_shift)
 
         # collision with spikes transitions and so on
         if pygame.sprite.spritecollideany(self, spike_group):
@@ -188,9 +189,9 @@ class Player(pygame.sprite.Sprite):
             self.transition(transition)
 
     def stop_player(self):
+        self.dashing = False
         self.dirX = 0
         self.jump = 0
-        self.dashing = False
         self.hit_sprite.deactivate()
         self.speedY = 0
 
@@ -224,13 +225,7 @@ class Player(pygame.sprite.Sprite):
     def respawn(self):
         # this method respawns player on last respawn area
         # if player falls in the spikes he will be respawned
-        self.dashing = False
-        self.dash_CD = 0
-        self.dash_enabled = True
-
-        self.speedY = 0
-        self.dirX = 0
-        self.jump = 0
+        self.stop_player()
 
         pygame.time.delay(50)
         self.rect.x, self.rect.y = self.respawn_pos
@@ -246,7 +241,6 @@ class Player(pygame.sprite.Sprite):
         the_level.transitioning_from = the_level.current_level
         self.stop_player()
         the_level.load_level(trans_sprite.next_level_ind)
-        print(self.rect.y)
 
     def gravity(self):
         self.speedY += self.G
@@ -267,6 +261,7 @@ class Hit(pygame.sprite.Sprite):
         self.active = False
 
         self.animation_dir = {}
+        self.animate_to_the_end = False
 
         for i in ['side', 'up', 'down']:
             self.animation_dir[i] = cut_the_frames(f'data/textures/{i}_slash.png', self.rect.w, self.rect.h)
@@ -299,7 +294,7 @@ class Hit(pygame.sprite.Sprite):
         keys = pygame.key.get_pressed()
 
         # position update
-        if not self.active:
+        if not self.active and not self.animate_to_the_end:
             if keys[pygame.K_DOWN] == keys[pygame.K_UP]:
                 self.rect.y = self.player.rect.y
                 self.rect.x = (self.player.rect.x + self.player.rect.w) if self.player.dirTowards \
@@ -308,7 +303,10 @@ class Hit(pygame.sprite.Sprite):
                 self.rect.y, self.rect.x = self.player.rect.y + self.player.rect.h, self.player.rect.x
             elif keys[pygame.K_UP]:
                 self.rect.y, self.rect.x = self.player.rect.y - self.rect.h, self.player.rect.x
-        else:
+
+        # animation is played if hit is active OR if we want it to play to the end
+        # (be fully played even if hit is not already active)
+        if self.active or self.animate_to_the_end:
             self.animate()
 
         # enable hit if hit button is released
@@ -320,6 +318,7 @@ class Hit(pygame.sprite.Sprite):
     def animate(self):
         self.current_frame += self.hit_speed
         if self.current_frame >= len(self.animation_dir[self.dir]):
+            self.animate_to_the_end = False
             self.current_frame = 0
             self.active = False
             self.image = self.transp_surface
@@ -331,10 +330,14 @@ class Hit(pygame.sprite.Sprite):
     def pogo(self):
         if pygame.sprite.spritecollideany(self, spike_group) and self.active:
             self.player.dirX = self.player.hit_pogo_speed_x * (1 if self.dir == 'side' and not self.player.dirTowards
-                                                               else -1 if self.dir == 'side' else 0)
+                                                               else -1 if self.dir == 'side' else self.player.dirX)
             self.player.speedY = self.player.hit_pogo_speed_y * (1 if self.dir == 'up'
-                                                                 else (-1 if self.dir == 'down' else 0))
+                                                                 else (-1 if self.dir == 'down' else self.player.speedY))
             self.deactivate()
+            if self.dir == 'down':
+                self.animate_to_the_end = True
+
+            # player abilities reset after pogo
             self.player.dash_enabled = True
             self.player.dash_CD = 0
             self.player.jump = 0 if self.dir == 'down' or self.dir == 'up' else self.player.jump
@@ -345,12 +348,29 @@ class Camera:
         self.dy = 0
         self.dx = 0
 
+        self.x_shift = 0
+        self.y_shift = 0
+
+        self.x_range = 300
+        self.y_range = 200
+
+        self.y_coef = 0
+        self.x_coef = 0
+
     def update(self):
-        self.dy = height // 2 - player.rect.y - player.rect.height // 2
-        self.dx = width // 2 - player.rect.x - player.rect.w // 2
+        self.dy = (height // 2 - player.rect.y - player.rect.height // 2)
+        self.dx = (width // 2 - player.rect.x - player.rect.w // 2)
+
+        # camera_shift_on_axis = -delta_on_axis * coefficient
+        # coefficient = 1 - min(abs(delta_on_axis) / value, 1)
+        # coefficient is needed in order for the camera would shift depending on the distance to the player
+        # value - is the distance at which camera shift disappears (== 0)
+        # If the distance is smaller, then the shift increases linearly proportional to it
+        self.x_shift = -self.dx * (1 - min(abs(self.dx) / self.x_range, 1))
+        self.y_shift = -self.dy * (1 - min(abs(self.dy) / self.y_range, 1))
 
     def apply(self, obj):
-        obj.rect = obj.rect.move(self.dx, self.dy)
+        obj.rect = obj.rect.move(self.dx + self.x_shift, self.dy + self.y_shift)
 
 
 class Transition(pygame.sprite.Sprite):
@@ -479,6 +499,7 @@ class Level:
                 p_y = transit_spr.rect.y - 2 * PIX_IN_M
 
         player.rect.x, player.rect.y = p_x, p_y
+        player.respawn_pos = (p_x, p_y)
         self.transitioning_from = None
 
     def unload_level(self):
@@ -518,7 +539,7 @@ if __name__ == '__main__':
 
     player = Player(0, 0)
     the_level = Level()
-    the_level.load_level(0)
+    the_level.load_level(2)
 
     camera = Camera()
 
