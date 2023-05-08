@@ -1,7 +1,0 @@
-{
- "#": "Level_Editor_modules/data/textures/inner_plat.png",
- "s": "Level_Editor_modules/data/textures/spike.png",
- "*": "Level_Editor_modules/data/textures/outer_plat.png",
- " ": "Level_Editor_modules/data/textures/default.png",
- "special": "Level_Editor_modules/data/textures/special.png"
-}

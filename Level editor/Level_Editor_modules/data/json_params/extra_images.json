@@ -1,7 +1,0 @@
-{
- "default_surf": "Level_Editor_modules/data/textures/default.png",
- "save_button": "Level_Editor_modules/data/textures/save_button.png",
- "open_button": "Level_Editor_modules/data/textures/open_button.png",
- "change_size_button": "Level_Editor_modules/data/textures/change_size_button.png",
- "waiting_image": "Level_Editor_modules/data/textures/waiting_image.png"
-}

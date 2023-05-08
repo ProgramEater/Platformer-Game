@@ -1,5 +1,6 @@
 import pygame
 import os
+import csv
 PIX_IN_M = 72
 
 
@@ -176,11 +177,6 @@ class Player(pygame.sprite.Sprite):
         self.rect.x += self.dirX * self.SPEED
         self.collision('x')
 
-        # updating respawn position
-        global camera
-        self.respawn_pos = (self.respawn_pos[0] + camera.dx + camera.x_shift,
-                            self.respawn_pos[1] + camera.dy + camera.y_shift)
-
         # collision with spikes transitions and so on
         if pygame.sprite.spritecollideany(self, spike_group):
             self.respawn()
@@ -300,11 +296,20 @@ class Hit(pygame.sprite.Sprite):
                 self.rect.x = (self.player.rect.x + self.player.rect.w) if self.player.dirTowards \
                     else (self.player.rect.x - self.player.rect.w)
             elif keys[pygame.K_DOWN]:
-                self.rect.y, self.rect.x = self.player.rect.y + self.player.rect.h, self.player.rect.x
+                self.rect.x, self.rect.y = self.player.rect.x, self.player.rect.y + self.player.rect.h
             elif keys[pygame.K_UP]:
-                self.rect.y, self.rect.x = self.player.rect.y - self.rect.h, self.player.rect.x
+                self.rect.x, self.rect.y = self.player.rect.x, self.player.rect.y - self.rect.h
+        else:
+            # change position if hit is active
+            if self.dir == 'side':
+                self.rect.x, self.rect.y = (player.rect.x + player.rect.w * (1 if self.player.dirTowards else -1),
+                                            player.rect.y)
+            elif self.dir == 'down':
+                self.rect.x, self.rect.y = player.rect.x, player.rect.y + player.rect.h
+            elif self.dir == 'up':
+                self.rect.x, self.rect.y = self.player.rect.x, self.player.rect.y - self.rect.h
 
-        # animation is played if hit is active OR if we want it to play to the end
+            # animation is played if hit is active OR if we want it to play to the end
         # (be fully played even if hit is not already active)
         if self.active or self.animate_to_the_end:
             self.animate()
@@ -351,8 +356,8 @@ class Camera:
         self.x_shift = 0
         self.y_shift = 0
 
-        self.x_range = 300
-        self.y_range = 200
+        self.x_range = 100
+        self.y_range = 100
 
         self.y_coef = 0
         self.x_coef = 0
@@ -366,11 +371,14 @@ class Camera:
         # coefficient is needed in order for the camera would shift depending on the distance to the player
         # value - is the distance at which camera shift disappears (== 0)
         # If the distance is smaller, then the shift increases linearly proportional to it
-        self.x_shift = -self.dx * (1 - min(abs(self.dx) / self.x_range, 1))
-        self.y_shift = -self.dy * (1 - min(abs(self.dy) / self.y_range, 1))
+        self.x_shift = -int(self.dx * (1 - min(abs(self.dx) / self.x_range, 1)))
+        self.y_shift = -int(self.dy * (1 - min(abs(self.dy) / self.y_range, 1)))
 
     def apply(self, obj):
         obj.rect = obj.rect.move(self.dx + self.x_shift, self.dy + self.y_shift)
+
+    def apply_player(self, player_obj):
+        self.apply(player_obj)
 
 
 class Transition(pygame.sprite.Sprite):
@@ -380,7 +388,7 @@ class Transition(pygame.sprite.Sprite):
 
         self.dir = direction
 
-        # direction of neares to the transition wall (if player goes right to get in it is 'r', wall to the left - 'l'
+        # direction of nearest to the transition wall (if player goes right to get in it is 'r', wall to the left - 'l'
         # up - 'u', down - 'd'
         self.wall_to = wall_to
 
@@ -388,20 +396,12 @@ class Transition(pygame.sprite.Sprite):
                                             (PIX_IN_M * 0.5 * (5 if direction == 'h' else 1),
                                              PIX_IN_M * 0.5 * (5 if direction == 'v' else 1)))
 
-        # sprite coords (x, y - coordinates of the middle digit in transition definition in text file)
-        # if transit is vertical we need to move it closer to the wall, so that it would touch it
-        # if it is horizontal we need to move it to the right so that it also would touch right wall
-        x_coord = (x + (1 if self.wall_to == 'r' else -1)) if direction == 'v' else x - 2
-        y_coord = (y - (2 if direction == 'v' else 0))
-
-        self.rect = pygame.rect.Rect(x_coord * 0.5 * PIX_IN_M, y_coord * 0.5 * PIX_IN_M, *self.image.get_size())
+        self.rect = pygame.rect.Rect(x, y, *self.image.get_size())
 
 
 class Level:
     def __init__(self, start_level=0):
         self.current_level = start_level
-        # list of level names in from 0 to more...
-        self.level_names = ['data/levels/' + i for i in list(os.walk('data/levels/'))[0][2]]
 
         # index of a level that player left when he transitioned
         # None - if he didn't come from another lvl but was teleported or died and so on
@@ -411,8 +411,9 @@ class Level:
         self.unload_level()
 
         self.current_level = index
-        with open(self.level_names[index]) as level:
-            level_lines = [i.strip() for i in level.readlines()]
+
+        with open(f'data/csv_levels/{index}.csv', mode='r', encoding='utf-8-sig') as level:
+            level_lines = [i for i in csv.reader(level, delimiter=';')]
             for y, st in enumerate(level_lines):
                 for x, elem in enumerate(st):
 
@@ -428,14 +429,44 @@ class Level:
                         player.rect.x, player.rect.y = x * 0.5 * PIX_IN_M, y * 0.5 * PIX_IN_M
                         player.respawn_pos = (x * 0.5 * PIX_IN_M, y * 0.5 * PIX_IN_M)
 
-                    elif elem in '-_|':
-                        # creating platform. Floor if '-', ceiling if '_', side if '|'
-                        tile.image = pygame.transform.scale(pygame.image.load('data/textures/grass_floor.png'),
+                    elif elem == '*':
+                        # creating outer platform
+                        tile.image = pygame.transform.scale(pygame.image.load('data/textures/'
+                                                                              'mech_outer_platform.png'),
                                                             (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
 
-                        # rotate floor texture by 90, 270 if that is side, 180 if it is ceiling
-                        tile.image = pygame.transform.rotate(tile.image, 0 if elem == '-' else (
-                            180 if elem == '_' else (90 if level_lines[y][x + 1] == '#' else -90)))
+                        # find neighbours of the platform
+                        neighbours = []
+                        # indexes
+                        #   0
+                        # 3 * 1
+                        #   2
+                        for x1, y1 in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+                            try:
+                                neighbours.append(level_lines[y + y1][x + x1])
+                            except IndexError:
+                                neighbours.append(' ')
+
+                        # rotate image according on neighbours
+                        if neighbours[0] != neighbours[2] and neighbours[1] != neighbours[3] \
+                                and neighbours.count('*') == 2:
+                            tile.image = pygame.transform.scale(pygame.image.load('data/textures/'
+                                                                                  'mech_corner_outer_platform.png'),
+                                                                (0.5 * PIX_IN_M, 0.5 * PIX_IN_M))
+                            if neighbours[0] == neighbours[3] == '*':
+                                tile.image = pygame.transform.rotate(tile.image, -90)
+                            elif neighbours[0] == neighbours[1] == '*':
+                                tile.image = pygame.transform.rotate(tile.image, 180)
+                            elif neighbours[1] == neighbours[2] == '*':
+                                tile.image = pygame.transform.rotate(tile.image, 90)
+                        else:
+                            if neighbours[1] == neighbours[3] == '*' and neighbours[0] == '#':
+                                tile.image = pygame.transform.rotate(tile.image, 180)
+                            elif neighbours[0] == '*':
+                                if neighbours[3] == '#':
+                                    tile.image = pygame.transform.rotate(tile.image, -90)
+                                else:
+                                    tile.image = pygame.transform.rotate(tile.image, 90)
 
                         platform_group.add(tile)
 
@@ -457,26 +488,16 @@ class Level:
 
                         spike_group.add(tile)
 
-                    elif elem.isdigit():
+                    elif 'Transition' in elem:
                         # transitions
-                        # if we find digit it means we need to place transition
-                        # transition is going to be defined with 3 symbols: direction letter and a number (from 0 to 99)
-                        # direction letter - 'h' or 'v' (horizontal or vertical)
+                        orientation, to_lvl = elem.split('|')[1:]
 
-                        # number is the number of level where transition leads to
-                        # (so index in self.level_names is number - 1)
-
-                        # ex: h12 - horizontal transition to lvl 13 (index - 12), v02 - vertical transition to lvl 2
-
-                        transit_def = st[x - 1:x + 2]
-
-                        # if transit_def[0] is not v or h that means that in h12 the elem is not 1 but 2
-                        # and transit_def in fact is 12. so transition was already created 1 iteration (step) before
-                        if transit_def[0] in 'hv':
-                            wall_to = ('u' if level_lines[y - 1][x] == '#' else 'd') \
-                                if transit_def[0] == 'h' else ('r' if st[x + 2] == '#' else 'l')
-                            tile = Transition(int(transit_def[1:]) - 1, transit_def[0], x, y, wall_to)
-                            transition_group.add(tile)
+                        wall_to = ('r' if st[x + 1] == '#' else 'l') if orientation == 'v' \
+                            else ('u' if level_lines[y - 1][x] == '#' else 'd')
+                        tile = Transition(to_lvl, orientation,
+                                          (x - (2 if orientation == 'h' else 0)) * 0.5 * PIX_IN_M,
+                                          (y - (2 if orientation == 'v' else 0)) * 0.5 * PIX_IN_M, wall_to)
+                        transition_group.add(tile)
 
             # if player was not teleported to spawn location because he transitioned from another lvl, we teleport him
             if self.transitioning_from is not None:
@@ -530,6 +551,7 @@ if __name__ == '__main__':
     # = height * 72 / 1080
     screen = pygame.display.set_mode(size)
 
+    # sprite groups
     player_group = pygame.sprite.Group()
 
     platform_group = pygame.sprite.Group()
@@ -537,9 +559,10 @@ if __name__ == '__main__':
     transition_group = pygame.sprite.Group()
     hit_group = pygame.sprite.Group()
 
+    # player
     player = Player(0, 0)
     the_level = Level()
-    the_level.load_level(2)
+    the_level.load_level('new_lvl')
 
     camera = Camera()
 
@@ -563,7 +586,9 @@ if __name__ == '__main__':
         for group in [platform_group, spike_group, transition_group]:
             for i in group:
                 camera.apply(i)
-        camera.apply(player)
+        player.respawn_pos = (player.respawn_pos[0] + camera.dx + camera.x_shift,
+                              player.respawn_pos[1] + camera.dy + camera.y_shift)
+        camera.apply_player(player)
 
         clock.tick(60)
 
