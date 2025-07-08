@@ -26,16 +26,17 @@ class Player(pygame.sprite.Sprite):
             self.animation_dir[j] = cut_the_frames(f'data/textures/{j}.png', self.rect.w, self.rect.h)
 
         # constant speeds and accelerations
-        self.SPEED = 6
-        self.G = 1.3
+        self.SPEED = 7
+        self.G = 1.25
 
         self.JUMP_SPEED = -12.5
         self.MAX_JUMP_TIME = 15
 
         self.xACC = 0.2
-        self.DASH_SPEED = 5.6
-        self.DASH_CD_DEFAULT = 15
-        self.DASH_ACC = 0.8
+        self.DASH_SPEED = 5
+        self.DASH_CD_DEFAULT = 10
+        self.DASH_ACC = self.DASH_SPEED // 2
+        self.DASH_MAX_TIME = 11
 
         # x speed of player
         self.dirX = 0
@@ -44,10 +45,13 @@ class Player(pygame.sprite.Sprite):
 
         # is player dashing
         self.dashing = False
-        # if player dashed but doesn't release dash button, we won't let him dash
+        # if player dashed but doesn't release dash button or
+        # he didn't touch the floor or any other way to regain dash, we won't let him dash
         self.dash_enabled = True
         # dash cooldown, interval between dashes
         self.dash_CD = 0
+        # time (in ticks) of dashing
+        self.dashing_time = 0
 
         # player Y speed
         self.speedY = 0
@@ -137,6 +141,7 @@ class Player(pygame.sprite.Sprite):
         if keys[pygame.K_c] and not self.dashing and not self.dash_CD and self.dash_enabled:
             self.dash_enabled = False
             self.dashing = True
+            self.dashing_time = 0
 
         if not self.dashing and keys[pygame.K_x] and not self.hit_sprite.active:
             self.hit_sprite.activate('up' if keys[pygame.K_UP] else 'down' if keys[pygame.K_DOWN] else 'side')
@@ -144,6 +149,8 @@ class Player(pygame.sprite.Sprite):
     def update(self):
         self.animate()
         self.get_input()
+
+        self.gravity()
 
         # jump time and update
         if self.current_jump_time != self.MAX_JUMP_TIME:
@@ -156,23 +163,23 @@ class Player(pygame.sprite.Sprite):
         # dash update and stopping
         if self.dashing:
             # you don't fall or jump while dashing, so y speed = 0
-            # that is actually causing a bug: when you jump touching the wall and dash, you stop moving upwards
             self.speedY = 0
-            self.dirX += self.DASH_ACC if self.dirTowards > 0 else -self.DASH_ACC
-            if abs(self.dirX) >= self.DASH_SPEED:
-                self.DASH_ACC *= -1
-            if abs(self.dirX) <= 1 and self.DASH_ACC < 0:
-                self.DASH_ACC *= -1
-                self.dirX = 1 if self.dirTowards else -1
+            if self.dashing_time < self.DASH_MAX_TIME - abs(self.dirX) // self.DASH_ACC:
+                self.dirX = min(self.DASH_SPEED, abs(self.dirX) + self.DASH_ACC) * (1 if self.dirTowards else -1)
+            else:
+                self.dirX -= self.DASH_ACC * (1 if self.dirTowards else -1)
+            self.dashing_time += 1
+            if self.dashing_time >= self.DASH_MAX_TIME:
                 self.dashing = False
+                self.dashing_time = 0
                 self.dash_CD = self.DASH_CD_DEFAULT
+                self.dirX = 1 if self.dirTowards else -1
         if self.dash_CD:
             self.dash_CD -= 1
 
-        self.gravity()
-
         # calculate collisions
         self.rect.y += self.speedY
+
         self.collision('y')
         self.rect.x += self.dirX * self.SPEED
         self.collision('x')
@@ -192,9 +199,23 @@ class Player(pygame.sprite.Sprite):
         self.speedY = 0
 
     def collision(self, axis):
-        if pygame.sprite.spritecollide(self, platform_group, False):
-            plat = pygame.sprite.spritecollide(self, platform_group, False)[0]
+        # if player moves with speed greater then size of side of tiles, he can pass through the tile
+        # in order to check collisions and move him properly I take all colliding platforms and then move player
+        # by to the platform that fits the best according to the speed
+        # for ex. if player moves right (along x axis) I take a platform that is most to the left as colliding platform
+        #   if I don't do this and player passes through the plat then he will be moved even more inside
+        #   the platform and then moved upwards because of y collision. And I don't need this
+        if pygame.sprite.spritecollideany(self, platform_group):
+            platforms = pygame.sprite.spritecollide(self, platform_group, False)
             if axis == 'y':
+                if self.speedY >= 0:
+                    # if player falls down:
+                    #   we take upper left platform (from colliding platforms) as colliding platform (plat)
+                    plat = platforms[0]
+                else:
+                    # else down right
+                    plat = platforms[-1]
+
                 self.rect.y = plat.rect.y - self.rect.h if self.speedY >= 0 else plat.rect.y + plat.rect.h
                 self.speedY = 0
                 # or (pygame.time.get_ticks() - self.jump_clicked) < 50 is needed to make jump timing bigger
@@ -208,15 +229,30 @@ class Player(pygame.sprite.Sprite):
                 if not pygame.key.get_pressed()[pygame.K_c]:
                     self.dash_enabled = True
             else:
+                if self.dirX > 0:
+                    # if player moves to the right:
+                    #   we take the upper left platform (from collisions) as a colliding platform
+                    plat = platforms[0]
+                else:
+                    # else we take down right platform
+                    plat = platforms[-1]
+
                 self.rect.x = plat.rect.x - self.rect.w if self.dirX > 0 else plat.rect.x + plat.rect.w
+
+                if pygame.sprite.spritecollideany(self, platform_group):
+                    # if player is still colliding even after moving
+                    # we need to move him out with same parameters
+                    self.collision('x')
+
                 self.dirX = 0
                 # stop dashing if hit the platform to the side
                 if self.dashing:
                     # player shouldn't be able to jump if he hits the platform while dashing
                     self.jump = 0
                     self.dash_CD = self.DASH_CD_DEFAULT
-                self.dashing = False
-                self.DASH_ACC *= -1 if self.DASH_ACC < 0 else 1
+                    self.dashing = False
+                    self.dashing_time = 0
+                    print('dASH STOP')
 
     def respawn(self):
         # this method respawns player on last respawn area
@@ -353,32 +389,19 @@ class Camera:
         self.dy = 0
         self.dx = 0
 
-        self.x_shift = 0
-        self.y_shift = 0
-
-        self.x_range = 100
-        self.y_range = 100
-
-        self.y_coef = 0
-        self.x_coef = 0
+        self.x_range = 200
+        self.y_range = 200
 
     def update(self):
         self.dy = (height // 2 - player.rect.y - player.rect.height // 2)
         self.dx = (width // 2 - player.rect.x - player.rect.w // 2)
 
-        # camera_shift_on_axis = -delta_on_axis * coefficient
-        # coefficient = 1 - min(abs(delta_on_axis) / value, 1)
-        # coefficient is needed in order for the camera would shift depending on the distance to the player
-        # value - is the distance at which camera shift disappears (== 0)
-        # If the distance is smaller, then the shift increases linearly proportional to it
-        self.x_shift = -int(self.dx * (1 - min(abs(self.dx) / self.x_range, 1)))
-        self.y_shift = -int(self.dy * (1 - min(abs(self.dy) / self.y_range, 1)))
+        # take only some of the camera offset according on the distance between player and the screen center
+        self.dx = int(self.dx * min(abs(self.dx) / self.x_range, 1))
+        self.dy = int(self.dy * min(abs(self.dy) / self.y_range, 1))
 
     def apply(self, obj):
-        obj.rect = obj.rect.move(self.dx + self.x_shift, self.dy + self.y_shift)
-
-    def apply_player(self, player_obj):
-        self.apply(player_obj)
+        obj.rect = obj.rect.move(self.dx, self.dy)
 
 
 class Transition(pygame.sprite.Sprite):
@@ -546,7 +569,7 @@ if __name__ == '__main__':
     pygame.init()
 
     # screen:
-    size = width, height = 1280, 800
+    size = width, height = 1600, 1000
     pygame.display.set_caption('4-LEVEL GAME!!!!!!!!')
     # = height * 72 / 1080
     screen = pygame.display.set_mode(size)
@@ -562,7 +585,7 @@ if __name__ == '__main__':
     # player
     player = Player(0, 0)
     the_level = Level()
-    the_level.load_level('new_lvl')
+    the_level.load_level('2')
 
     camera = Camera()
 
@@ -586,13 +609,13 @@ if __name__ == '__main__':
         for group in [platform_group, spike_group, transition_group]:
             for i in group:
                 camera.apply(i)
-        player.respawn_pos = (player.respawn_pos[0] + camera.dx + camera.x_shift,
-                              player.respawn_pos[1] + camera.dy + camera.y_shift)
-        camera.apply_player(player)
+        player.respawn_pos = (player.respawn_pos[0] + camera.dx,
+                              player.respawn_pos[1] + camera.dy)
+        camera.apply(player)
 
         clock.tick(60)
 
-        screen.fill((255, 255, 255))
+        screen.fill((60, 60, 70))
 
         transition_group.draw(screen)
         platform_group.draw(screen)
